@@ -145,5 +145,67 @@ def generate_fragment_list(input_sequence, fragment_length, overlap, NA=False, n
         del overlaps[count-1]
     if n_to_c_term == False:
         fragment_list.reverse()
-        
+
     return fragment_list, overlaps
+
+
+def prepare_domain_fragment(domain_pdb, out_dir):
+    """ prepare a rigid folded domain PDB as a single-frame MD-fragment folder, matching
+    the "pair0.pdb" + "pair.xtc" convention every other MD fragment folder uses, so it
+    can be loaded like any other fragment during hierarchical chain growth.
+
+    Parameters
+    ----------
+    domain_pdb : string
+        path to the folded domain's PDB structure (a single, rigid conformation)
+    out_dir : string
+        folder to write "pair0.pdb" and "pair.xtc" into, e.g. "MDfragments/<domain_id>"
+
+    Returns
+    -------
+    None.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    u = mda.Universe(domain_pdb)
+    u.atoms.write('{}/pair0.pdb'.format(out_dir))
+    u.atoms.write('{}/pair.xtc'.format(out_dir), frames='all')
+
+
+def add_domain_to_fragment_list(n_fragments, domain_id, terminus):
+    """ build the ordered list of fragment ids for hierarchical chain growth with a
+    rigid folded domain attached at one terminus.
+
+    This only orders the fragment ids so the domain is placed at the correct end
+    without renumbering any of the ordinary MD fragments' folders. The domain's
+    overlap with its neighboring fragment is passed separately, as the
+    `domain_overlap` parameter of `hierarchical_chain_growth` /
+    `reweighted_hierarchical_chain_growth` -- it is used only for the domain's own
+    junction and does not touch `overlaps_d`, which reserves key `0` for the run's
+    general default overlap.
+
+    Parameters
+    ----------
+    n_fragments : integer
+        number of ordinary IDR MD fragments (== len(fragment_list) returned by
+        `generate_fragment_list`); ordinary fragment ids are assumed to be `0, ...,
+        n_fragments - 1`, matching their MDfragments folder names
+    domain_id : hashable
+        id of the folded domain's MDfragments folder; must not collide with `0, ...,
+        n_fragments - 1`
+    terminus : string
+        'N' to attach the domain at the N-terminus (domain placed first), 'C' to
+        attach it at the C-terminus (domain placed last)
+
+    Returns
+    -------
+    fragment_ids : list
+        ordered list of fragment ids, including `domain_id`, to pass as `fragment_ids`
+        to `chain_growth.hcg_list.make_hcl_l`
+    """
+    fragment_ids = list(range(n_fragments))
+    if terminus == 'N':
+        return [domain_id] + fragment_ids
+    elif terminus == 'C':
+        return fragment_ids + [domain_id]
+    else:
+        raise ValueError("terminus must be 'N' or 'C'")

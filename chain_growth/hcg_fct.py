@@ -149,10 +149,11 @@ def merge_universe(u1,u2, merge_begin1, merge_end1,
 
 
 def get_residue_indices_for_assembly(overlap0, current_overlap, capping_groups,
-                                     last_level, verbose):
-    """ assign residue indices for alignment, clash detection, assembly 
+                                     last_level, verbose, strip_cap_nterm=None,
+                                     strip_cap_cterm=None):
+    """ assign residue indices for alignment, clash detection, assembly
     -> indices depend on the overlap between subsequent fragments
-    
+
     Parameters
     ----------
     current_overlap : integer
@@ -163,7 +164,15 @@ def get_residue_indices_for_assembly(overlap0, current_overlap, capping_groups,
         MD fragment are sampled with or without end-capping groups. The default is True
     last_level : boolean, optional
         last level of hierarchical chain growth. The default is False
-    
+    strip_cap_nterm : boolean, optional
+        whether to strip the capping-group residue at the N-terminal-most exposed end
+        at last_level. Defaults to `capping_groups` when None. Set to False when that
+        end is a folded domain's real terminus rather than a synthetic cap.
+    strip_cap_cterm : boolean, optional
+        whether to strip the capping-group residue at the C-terminal-most exposed end
+        at last_level. Defaults to `capping_groups` when None. Set to False when that
+        end is a folded domain's real terminus rather than a synthetic cap.
+
     Returns
     -------
     index_aln_l : list
@@ -173,6 +182,11 @@ def get_residue_indices_for_assembly(overlap0, current_overlap, capping_groups,
     index_merge_l : list
         residue indices for fragment assembly, used in merge_universe
     """
+    if strip_cap_nterm is None:
+        strip_cap_nterm = capping_groups
+    if strip_cap_cterm is None:
+        strip_cap_cterm = capping_groups
+
     ## e: additional factor for end-capping groups
     ## having 1 overlapping residue + align peptide bonds does work only with headgroup!
     e = 1
@@ -180,35 +194,37 @@ def get_residue_indices_for_assembly(overlap0, current_overlap, capping_groups,
         e = 0
         align_begin1= -2
         align_end1= -1
-        align_begin2= 0     
+        align_begin2= 0
     else:
-        if overlap0 > 1 and capping_groups == False:
+        if overlap0 > 0 and capping_groups == False:
             e = 0
-        # align peptide bond between two last/ two first residues 
+        # align peptide bond between two last/ two first residues
         align_begin1= -(overlap0 + e)
         align_end1= align_begin1+1
         align_begin2= 0 + e
-        
+
     if current_overlap != overlap0:
         align_begin2= np.abs(current_overlap - overlap0) + e
-    align_end2= align_begin2+1        
-    
-        
+    align_end2= align_begin2+1
+
+
     # indices to exclude residues from clash calculation
     index1_clashB = align_begin1
     index2_clashE = align_end2
-        
-    # indicies for assembly of aligned pairs    
+
+    # indicies for assembly of aligned pairs
     merge_begin1 = 0 # always first residue, maybe change this to make it more flexible??
     merge_end1 = align_begin1
     merge_begin2 = align_end2
     merge_end2 = -1 #always last residue, maybe change this to make it more flexible??
-    
+
     # exclude capping groups
-    if capping_groups and last_level:
-        merge_begin1 = 1
-        merge_end2 = -2
-    
+    if last_level:
+        if strip_cap_nterm:
+            merge_begin1 = 1
+        if strip_cap_cterm:
+            merge_end2 = -2
+
     index_aln_l = [align_begin1, align_end1, align_begin2, align_end2]
     index_clash_l = [index1_clashB, index2_clashE]
     index_merge_l = [merge_begin1, merge_end1, merge_begin2, merge_end2]
@@ -265,7 +281,7 @@ def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
     k = 0
     assembly_atempt = 0
     
-    if np.all(ri_l) is None:
+    if ri_l is None:
         # array to store random frame indices of successfully assembled fragments / pairs        
         rs = np.zeros((kmax, 2))
     writePDB = True
@@ -319,10 +335,11 @@ def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
         return None
 
 
-def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax, 
+def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
              rmsd_cut_off=0.6, clash_distance=2.0, capping_groups=True,
-             ri_l=None, verbose=False):
-    """ perform hierarchical chain growth 
+             ri_l=None, verbose=False, domain_id=None, domain_overlap=None,
+             strip_cap_nterm=None, strip_cap_cterm=None):
+    """ perform hierarchical chain growth
     assemble fragments/ pairs of fragments until reaching the full-length chain
 
     Parameters
@@ -334,7 +351,7 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
     overlaps_d : dictionary
         dict of overlaps between subsequent fragments
     path0 : string
-        path to the MD fragments 
+        path to the MD fragments
     path : string
         path to folders where the assembled pairs are stored in
 
@@ -352,27 +369,46 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
         array with indices for chosing a specific confoormation of a fragment. The default is None
     draw_indices : booolean
         if new random integers == frame indices are drawn or else taken from a input array.
-   
+    domain_id : hashable, optional
+        fragment id (as used in `fragment_list`/the MDfragments folder name) of a rigid folded
+        domain to attach the IDR to. When set, the junction where the domain first joins its
+        neighboring fragment is treated as capping-group-free (its overlap residues are the
+        domain's own real residues, not a synthetic cap), using `domain_overlap` rather than an
+        `overlaps_d` lookup. The default is None (no domain).
+    domain_overlap : integer, optional
+        number of residues the domain shares with its neighboring fragment's overlap region.
+        Required when `domain_id` is set; not read from `overlaps_d` (which reserves key `0` for
+        the run's general default overlap).
+    strip_cap_nterm : boolean, optional
+        whether to strip the capping-group residue at the N-terminal-most exposed end of the
+        full-length chain at the last assembly level. Defaults to `capping_groups` when None. Set
+        to False when the N-terminus is a folded domain's real terminus (attached via
+        `domain_id`) rather than a synthetic cap.
+    strip_cap_cterm : boolean, optional
+        whether to strip the capping-group residue at the C-terminal-most exposed end of the
+        full-length chain at the last assembly level. Defaults to `capping_groups` when None. Set
+        to False when the C-terminus is a folded domain's real terminus (attached via
+        `domain_id`) rather than a synthetic cap.
+
     Returns
     -------
     None.
     """
-    
+
     last_level = False
     k_max = kmax
-    
-    for m , fragment_l in enumerate(hcg_l): 
+
+    for m , fragment_l in enumerate(hcg_l):
         # folder to save assembled pair in this level (m+1)
         level = m+1
         # folder to get old pairs from previous level (m)
         previous_level = m
         promotion  = promo_l[m]
         overlap = overlaps_d[0]
-        try:
-            if np.all(ri_l) is None:
-                draw_indices = True
-                r_l = []
-        except:
+        if ri_l is None:
+            draw_indices = True
+            r_l = []
+        else:
             r_l = ri_l[m]
             draw_indices = False
            
@@ -426,27 +462,44 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
             u2 = mda.Universe('{}/pair0.pdb'.format(old_dire2),
                               '{}/pair.xtc'.format(old_dire2))                       
             
+            # the domain's own junction (where it first joins its neighboring fragment,
+            # i.e. that side of pair_l is still a raw, unmerged fragment) is not a
+            # "typical" variation of the general fragment overlap: it has its own
+            # overlap length (domain_overlap) and its overlap residues are the
+            # domain's real residues, not a synthetic cap. It is looked up via
+            # domain_overlap, not overlaps_d, since overlaps_d reserves key 0 for the
+            # run's general default overlap.
+            domain_first_junction = domain_id is not None and (
+                    (old_pair1 == domain_id and isinstance(pair_l[0], list) == False) or
+                    (old_pair2 == domain_id and isinstance(pair_l[1], list) == False))
+
             # residue ovearlap MD fragment
-            if len(flatten(pair_l[1])) == 1: 
+            if domain_first_junction:
+                o = domain_overlap
+            elif len(flatten(pair_l[1])) == 1:
                 o = overlaps_d[old_pair2]
             # overlap grown pairs, always == overlaps[0]
             # -> overlap that differs "corrected" for when growing pairs with MD fragment
             else:
                 o = overlap
-            
+
+            pair_overlap0 = o if domain_first_junction else overlap
+            pair_capping_groups = False if domain_first_junction else capping_groups
+
             # get indices for assembly
             index_aln_l, index_clash_l, index_merge_l = get_residue_indices_for_assembly(
-                                                    overlap0=overlap, current_overlap=o,
-                                                    capping_groups=capping_groups, last_level=last_level,
-                                                    verbose=verbose)    
-            
+                                                    overlap0=pair_overlap0, current_overlap=o,
+                                                    capping_groups=pair_capping_groups, last_level=last_level,
+                                                    verbose=verbose, strip_cap_nterm=strip_cap_nterm,
+                                                    strip_cap_cterm=strip_cap_cterm)
+
             ## check if for u2 residue 2 that is aligned is ja proline
             res2_u2 = u2.select_atoms('resid {}'.format(u2.atoms.residues[index_aln_l[-1]].resid))
             res2_u2_name = res2_u2.residues.resnames
             if res2_u2_name == 'PRO':
                 proline_2nd_posi = True
-            
-            # create dictionary with desired residues 
+
+            # create dictionary with desired residues
             # defined as "mobile" and "ref" you want to superimpose
             select = translate_concept(u1, u2, proline_2nd_posi, *index_aln_l)
             if verbose:
@@ -456,7 +509,7 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
                       u1.select_atoms('{}'.format(select['mobile'])).residues.resnames)
                 print('fragment 2 ',
                       u2.select_atoms('{}'.format(select['reference'])).residues.resnames)
-            
+
             # assemble the fragments into pairs
             # (or pairs into pairs of pairs)
             if  draw_indices:
@@ -537,7 +590,7 @@ def reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merg
     # array to store product of weights cW1 * cW2 of assembled fragments / pairs from current level
     assembled_chain_weights = np.zeros(kmax)
     
-    if np.all(ri_l) is None:
+    if ri_l is None:
         # array to store random frame indices of successfully assembled fragments / pairs        
         rs = np.zeros((kmax, 2))
 
@@ -598,9 +651,10 @@ def reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merg
         return assembled_chain_weights
 
 
-def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax, 
+def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
              rmsd_cut_off=0.6, clash_distance=2.0, capping_groups=True,
-             ri_l=None,  path2weights='weights/', theta=10.0,  verbose=False):
+             ri_l=None,  path2weights='weights/', theta=10.0,  verbose=False,
+             domain_id=None, domain_overlap=None, strip_cap_nterm=None, strip_cap_cterm=None):
     """ perform reweighted hierarchical chain growth (+ ímportance sampling)
     assemble fragments (reweighted according to experimental data)
                         or pairs of fragments until reaching the full-length chain
@@ -614,7 +668,7 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
     overlaps_d : dictionary
         dict of overlaps between subsequent fragments
     path0 : string
-        path to the MD fragments 
+        path to the MD fragments
     path : string
         path to folders where the assembled pairs are stored in
     path : path
@@ -631,7 +685,16 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
         array with indices for chosing a specific confoormation of a fragment. The default is None (=0)
     draw_indices : booolean
         if new random integers == frame indices are drawn or else taken from a input array.
-   
+    domain_id : hashable, optional
+        fragment id of a rigid folded domain to attach the IDR to, see
+        `hierarchical_chain_growth`. The default is None (no domain).
+    domain_overlap : integer, optional
+        see `hierarchical_chain_growth`. Required when `domain_id` is set.
+    strip_cap_nterm : boolean, optional
+        see `hierarchical_chain_growth`. The default is None (defaults to `capping_groups`).
+    strip_cap_cterm : boolean, optional
+        see `hierarchical_chain_growth`. The default is None (defaults to `capping_groups`).
+
     Returns
     -------
     None.
@@ -651,12 +714,11 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
         if level > 1 :# and weighted:
             chain_weights_prev = np.load("{}/chain_weight_level{}.npy".format(path, previous_level), allow_pickle=True)
         else:
-            chain_weights_prev = None 
-        try:
-            if np.all(ri_l) is None:
-                draw_indices = True
-                r_l = []
-        except:
+            chain_weights_prev = None
+        if ri_l is None:
+            draw_indices = True
+            r_l = []
+        else:
             r_l = ri_l[m]
             draw_indices = False
 
@@ -735,27 +797,44 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
             
             # store w1, w2 in a list as input for fragment_assembly
             w_l = [w1, w2]
+            # the domain's own junction (where it first joins its neighboring fragment,
+            # i.e. that side of pair_l is still a raw, unmerged fragment) is not a
+            # "typical" variation of the general fragment overlap: it has its own
+            # overlap length (domain_overlap) and its overlap residues are the
+            # domain's real residues, not a synthetic cap. It is looked up via
+            # domain_overlap, not overlaps_d, since overlaps_d reserves key 0 for the
+            # run's general default overlap.
+            domain_first_junction = domain_id is not None and (
+                    (old_pair1 == domain_id and isinstance(pair_l[0], list) == False) or
+                    (old_pair2 == domain_id and isinstance(pair_l[1], list) == False))
+
             # residue ovearlap MD fragment
-            if len(flatten(pair_l[1])) == 1: 
+            if domain_first_junction:
+                o = domain_overlap
+            elif len(flatten(pair_l[1])) == 1:
                 o = overlaps_d[old_pair2]
             # overlap grown pairs, always == overlaps[0]
             # -> overlap that differs "corrected" for when growing pairs with MD fragment
             else:
                 o = overlap
-            
+
+            pair_overlap0 = o if domain_first_junction else overlap
+            pair_capping_groups = False if domain_first_junction else capping_groups
+
             # get indices for assembly
             index_aln_l, index_clash_l, index_merge_l = get_residue_indices_for_assembly(
-                                                    overlap0=overlap, current_overlap=o,
-                                                    capping_groups=capping_groups, last_level=last_level,
-                                                    verbose=verbose)    
-            
+                                                    overlap0=pair_overlap0, current_overlap=o,
+                                                    capping_groups=pair_capping_groups, last_level=last_level,
+                                                    verbose=verbose, strip_cap_nterm=strip_cap_nterm,
+                                                    strip_cap_cterm=strip_cap_cterm)
+
             ## check if for u2 residue 2 that is aligned is ja proline
             res2_u2 = u2.select_atoms('resid {}'.format(u2.atoms.residues[index_aln_l[-1]].resid))
             res2_u2_name = res2_u2.residues.resnames
             if res2_u2_name == 'PRO':
                 proline_2nd_posi = True
-            
-            # create dictionary with desired residues 
+
+            # create dictionary with desired residues
             # defined as "mobile" and "ref" you want to superimpose
             select = translate_concept(u1, u2, proline_2nd_posi, *index_aln_l)
             if verbose:
