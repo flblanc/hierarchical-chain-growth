@@ -21,14 +21,14 @@ alpha-synuclein. To accurately sample local structure, we use replica exchange m
 Example installation in a new conda environment
 
 ```bash
-conda create -n hcg_py3.7 python=3.7
-conda activate hcg_py3.7
+conda create -n hcg python=3.11
+conda activate hcg
 git clone https://github.com/bio-phys/hierarchical-chain-growth.git
 cd hierarchical-chain-growth
 pip install -e .
 ```
 
-Python 3.6+ is required. This procedure was tested on Ubuntu 18.04.6. and Mac OS 12.0.1
+Python 3.9+ is required.
 
 ## Inputs
 - The sequence or topology file of the desired IDP/IDR as string (one letter amino acid code), .fasta, or .pdb, respectively. If you use .fasta make sure the fasta file contains a "header" beginning with ">".

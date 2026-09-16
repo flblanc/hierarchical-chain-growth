@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import collections
+import collections.abc
 
 def pair_fragments(input_ar, verbose = False):
     """ create pairs for each level
@@ -69,7 +69,7 @@ def flatten(pair_list):
         flattened lists of pairs
     """
     
-    if isinstance(pair_list, collections.Iterable):
+    if isinstance(pair_list, collections.abc.Iterable):
         return [a for i in pair_list for a in flatten(i)]
     else:
         return [pair_list]

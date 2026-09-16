@@ -6,6 +6,8 @@ __pycache__/
 
 # ignore some outputs tests
 pair*
+.pair.xtc_offsets.lock
+tests/integration/test_run_truncated_tauK18/
 
 # dirs from develop
 hierarchical_chain_growth.egg-info/

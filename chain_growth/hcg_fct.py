@@ -9,7 +9,7 @@ core functions for hierarchical chain growth
 import numpy as np
 import MDAnalysis as mda
 from MDAnalysis.analysis import align
-import pathlib2, shutil, os
+import pathlib, shutil, os
 import MDAnalysis.analysis.distances as distances
 from chain_growth.hcg_list import flatten
 
@@ -404,7 +404,7 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
             old_dire2 = '{}/{}/{}'.format(path2fragment, previous_level, old_pair2)
             # create folder/path to store assembled pairs
             dire = "{}/{}/{}".format(path, level, old_pair1)
-            pathlib2.Path(dire).mkdir(parents=True, exist_ok=True)
+            pathlib.Path(dire).mkdir(parents=True, exist_ok=True)
             
             # promotion of unpaired fragment to next higher hierarchy level
             if promotion and m_i == (len(fragment_l)-1):
@@ -691,7 +691,7 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
             old_dire2 = '{}/{}/{}'.format(path2fragment, previous_level, old_pair2)
             # create folder/path to store assembled pairs
             dire = "{}/{}/{}".format(path, level, old_pair1)
-            pathlib2.Path(dire).mkdir(parents=True, exist_ok=True)
+            pathlib.Path(dire).mkdir(parents=True, exist_ok=True)
             
             # print('level, fragment, old_pairs, counter ', level, m_i, old_pair1, old_pair2, c1, c2)#, chain_weights_prev)
             
