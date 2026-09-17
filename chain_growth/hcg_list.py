@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import collections
 
 def pair_fragments(input_ar, verbose = False):
     """ create pairs for each level
@@ -69,26 +68,35 @@ def flatten(pair_list):
         flattened lists of pairs
     """
     
-    if isinstance(pair_list, collections.Iterable):
+    # only recurse into actual nested lists (as built by pair_fragments); checking for
+    # collections.abc.Iterable instead would also recurse into a string fragment id
+    # (e.g. a folded domain's id) character by character, infinitely
+    if isinstance(pair_list, list):
         return [a for i in pair_list for a in flatten(i)]
     else:
         return [pair_list]
 
 
-def make_hcl_l(N, n_to_c_term = True):
+def make_hcl_l(N, n_to_c_term = True, fragment_ids = None):
     """ create input list with fragments/ pairs of fragments to assemble in HCG to get the full-length chain
-    
+
     Parameter
     ---------
     N : integer
         number of fagments
     n_to_c_term : boolean
-        direction of growth 
+        direction of growth
         True : from N-terminus to C-terminus
         False : from C-terminus to N-terminus
-        
+    fragment_ids : list, optional
+        explicit, ordered list of fragment ids (matching MDfragments folder names) to use
+        instead of the default `0, 1, ..., N-1`. Must have length N. Lets a fragment with a
+        non-consecutive id (e.g. a folded domain attached via `hierarchical_chain_growth`'s
+        `domain_id`) be placed at either end without renumbering the other fragments'
+        folders. The default is None (uses `0, ..., N-1`, unchanged from before).
+
     Returns:
-    hcg_a[:,0] : list 
+    hcg_a[:,0] : list
         list for HCG with lists of fragments assigned to be paired
     hcg_a[:,1] : list
         list with boolean, if here is an promotion in level m (last assembly step)
@@ -96,7 +104,7 @@ def make_hcl_l(N, n_to_c_term = True):
     next_power2 = next_power_of_2(N)
     # from next power of 2 create max number of assemling levels -> M
     m = np.log2(next_power2).astype(int)
-    frag_pair_l = list(np.arange(N))
+    frag_pair_l = list(fragment_ids) if fragment_ids is not None else list(np.arange(N))
     hcg_l = []
     promo_l =  [] 
     ## loop through number of levels to generate list of paired fragment/ pairs of paired fragments

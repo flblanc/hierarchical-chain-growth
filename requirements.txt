@@ -1,6 +1,5 @@
-numpy<2
-MDAnalysis==1.1.1
-pathlib2
+numpy
+MDAnalysis>=2.0
 jupyter
 pytest
 tqdm

@@ -21,14 +21,14 @@ alpha-synuclein. To accurately sample local structure, we use replica exchange m
 Example installation in a new conda environment
 
 ```bash
-conda create -n hcg_py3.7 python=3.7
-conda activate hcg_py3.7
+conda create -n hcg python=3.11
+conda activate hcg
 git clone https://github.com/bio-phys/hierarchical-chain-growth.git
 cd hierarchical-chain-growth
 pip install -e .
 ```
 
-Python 3.6+ is required. This procedure was tested on Ubuntu 18.04.6. and Mac OS 12.0.1
+Python 3.9+ is required.
 
 ## Inputs
 - The sequence or topology file of the desired IDP/IDR as string (one letter amino acid code), .fasta, or .pdb, respectively. If you use .fasta make sure the fasta file contains a "header" beginning with ">".
@@ -63,6 +63,52 @@ on a HPC cluster to grow an ensemble with n x1000 members. This can be done usin
 In our recent study [2] we found that ensembles with >=10000 members give meaningful ensemble averages.
 
 
+### Attach the IDR to a folded domain
+
+HCG can also grow an IDR that attaches to a folded domain at one terminus (N- or C-ter),
+instead of growing a free-standing IDR. The domain is treated as a single, rigid
+conformation (not an ensemble); mid-sequence insertion into a domain is not supported.
+
+**Fragment library requirement:** the domain-facing terminal MD fragment must be
+simulated so that its overlap residues are the domain's own real residues, not a
+synthetic ACE/NME cap -- exactly how ordinary IDR fragments already overlap each other.
+For example, for a C-terminal domain attachment, that fragment's simulated sequence
+should end in the domain's own first `domain_overlap` residues instead of a capping
+group. This fragment-library design happens during simulation setup, outside this code.
+
+Worked example, attaching a domain at the IDR's C-terminus (see
+`examples/run_chain_growth/run_hcg_domain_attachment.py` for the full script):
+
+```python
+from chain_growth.hcg_list import make_hcl_l
+from chain_growth.fragment_list import (generate_fragment_list, add_domain_to_fragment_list,
+                                         prepare_domain_fragment)
+from chain_growth.hcg_fct import hierarchical_chain_growth
+
+# as usual: build the fragment list for the IDR portion only
+fragment_l, overlaps_d = generate_fragment_list('sequence.fasta', fragment_length=5, overlap=2)
+
+# prepare the domain as a rigid, single-frame MD-fragment folder (pair0.pdb + pair.xtc),
+# matching the convention every ordinary MD fragment folder already uses
+domain_id = 'domain'
+domain_overlap = 2  # residues shared between the domain and its neighboring fragment
+prepare_domain_fragment('folded_domain.pdb', 'MDfragments/{}'.format(domain_id))
+
+# splice the domain into the fragment order (terminus='N' attaches it at the other end)
+fragment_ids = add_domain_to_fragment_list(len(fragment_l), domain_id, terminus='C')
+hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
+
+# strip_cap_cterm=False keeps the domain's real terminal residue instead of treating it
+# as a synthetic cap to discard; strip_cap_nterm=True still strips the free end's cap
+hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0='.', path='out/', kmax=100,
+        capping_groups=True, domain_id=domain_id, domain_overlap=domain_overlap,
+        strip_cap_nterm=True, strip_cap_cterm=False)
+```
+
+For N-terminal attachment, pass `terminus='N'` to `add_domain_to_fragment_list` and swap
+the `strip_cap_*` flags (`strip_cap_nterm=False, strip_cap_cterm=True`), so the domain's
+real N-terminal residue is kept while the free C-terminal end's cap is still stripped.
+
 ## Testing
 
 Run tests
@@ -77,7 +123,9 @@ A free web application to grow ensembles of disordered proteins can be found her
 
 ## Branch "multiprocessing_hcg"
 
-We uploaded a speed-up version of HCG to the branch “multiprocessing_hcg”. Here, fragment assembly steps in one level are run in parallel. This version of HCG is also run in our web application of HCG. NOTE: For now, only HCG can be run in this way.
+We uploaded a speed-up version of HCG to the branch “multiprocessing_hcg”. Here, fragment assembly steps in one level are run in parallel. This version of HCG is also run in our web application of HCG.
+
+In this fork, this branch has been rebased on top of the terminal domain-attachment feature described above (`domain_id`/`domain_overlap`/`strip_cap_nterm`/`strip_cap_cterm`), so a folded domain can be attached while growth runs in parallel. RHCG has also been restored on this branch to a working implementation (it was reduced to a non-functional placeholder upstream) — it is not yet parallelized, only plain HCG is.
 
 ### Single-stranded nucleic acid
 

@@ -5,7 +5,7 @@ development version of rhcg - run example for short tau K18
 """
 from lib import translate_concept, find_clashes, merge_universe
 import sys
-import pathlib2
+import pathlib
 import numpy as np
 import MDAnalysis as mda
 from MDAnalysis.analysis import align
@@ -77,7 +77,7 @@ def reweighted_hierarchical_chain_growth(path2pep, path2weights, path, pair ,sta
         i2 = int(i+steps2subsequent_fragment)
         dire = "{}/pair{}_{}".format(path, pair,i)
         k = 0
-        pathlib2.Path(dire).mkdir(parents=True, exist_ok=True)
+        pathlib.Path(dire).mkdir(parents=True, exist_ok=True)
         
         # indices or residue numbers for the assembly functions
         #translate_concept

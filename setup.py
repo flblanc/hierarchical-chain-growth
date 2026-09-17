@@ -24,4 +24,5 @@ setup(name='hierarchical-chain-growth',
       install_requires=install_requires,
       license='GPLv3',
       packages=find_packages(exclude=['examples']),
+      python_requires='>=3.9',
       zip_safe=False)
