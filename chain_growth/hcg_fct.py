@@ -192,15 +192,15 @@ def get_residue_indices_for_assembly(overlap0, current_overlap, capping_groups,
     ## e: additional factor for end-capping groups
     ## having 1 overlapping residue + align peptide bonds does work only with headgroup!
     e = 1
-    if overlap0  <= 1:
+    if overlap0  == 0:
         e = 0
         align_begin1= -2
         align_end1= -1
-        align_begin2= 0     
+        align_begin2= 0
     else:
-        if overlap0 > 1 and capping_groups == False:
+        if overlap0 > 0 and capping_groups == False:
             e = 0
-        # align peptide bond between two last/ two first residues 
+        # align peptide bond between two last/ two first residues
         align_begin1= -(overlap0 + e)
         align_end1= align_begin1+1
         align_begin2= 0 + e
@@ -339,7 +339,8 @@ def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
 def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
              dict_to_fragment_folder=None, rmsd_cut_off=0.6, clash_distance=2.0, capping_groups=True,
              ri_l=None, streamlit_progressbar=None, verbose=False, domain_id=None,
-             domain_overlap=None, strip_cap_nterm=None, strip_cap_cterm=None):
+             domain_overlap=None, strip_cap_nterm=None, strip_cap_cterm=None,
+             num_threads=None):
     """ perform hierarchical chain growth 
     assemble fragments/ pairs of fragments until reaching the full-length chain
     by calling _loop_func -> does the inner loop and calls fragment assembly
@@ -395,6 +396,13 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
         full-length chain at the last assembly level. Defaults to `capping_groups` when None. Set
         to False when the C-terminus is a folded domain's real terminus (attached via
         `domain_id`) rather than a synthetic cap.
+    num_threads : integer, optional
+        number of worker processes to use for the per-level Pool that assembles a level's
+        independent fragment pairs in parallel. The default is None, which auto-detects
+        `os.cpu_count()` (capped at the number of pairs in a level). Set to 1 to force fully
+        serial execution -- e.g. when calling this from a context where starting subprocesses
+        is unsafe or undesirable (a plain interactive/REPL session, some notebook setups, or a
+        shared/HPC login node), or for debugging.
 
     Returns
     -------
@@ -406,7 +414,7 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
     number_hcg_levels = hcg_l.__len__()
     i_it = 0
 
-    cpu = os.cpu_count()
+    cpu = os.cpu_count() if num_threads is None else num_threads
     for m , fragment_l in enumerate(hcg_l): 
         # folder to save assembled pair in this level (m+1)
         level = m+1
@@ -428,9 +436,9 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
             last_level = True
     
         if len(fragment_l) > cpu:
-            num_threads = cpu
+            level_num_threads = cpu
         else:
-            num_threads = len(fragment_l)
+            level_num_threads = len(fragment_l)
         pairs = [(m_i, pair_l) for m_i, pair_l in enumerate(fragment_l)]
         d = {"path0": path0, "path": path, 
              "dict_to_fragment_folder": dict_to_fragment_folder,
@@ -442,7 +450,7 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
              "domain_id": domain_id, "domain_overlap": domain_overlap,
              "strip_cap_nterm": strip_cap_nterm, "strip_cap_cterm": strip_cap_cterm }
         # POOL LOOP application
-        with Pool(num_threads) as p: 
+        with Pool(level_num_threads) as p:
             func = partial(_loop_func, d)
             results = p.map(func, pairs)
         if draw_indices:

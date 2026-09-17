@@ -8,13 +8,11 @@ from chain_growth.hcg_list import make_hcl_l
 from chain_growth.fragment_list import add_domain_to_fragment_list
 
 
-@pytest.mark.parametrize("overlap0", [2, 3])
+@pytest.mark.parametrize("overlap0", [1, 2])
 def test_get_residue_indices_no_cap_offset_for_any_overlap(overlap0):
     '''capping_groups=False must drop the synthetic-cap offset (e=0) regardless of
-    overlap0. NOTE: this branch collapses overlap0<=1 into its own, pre-existing
-    special-case (fixed align_begin1=-2/align_begin2=0, independent of capping_groups
-    and unrelated to this port), so overlap0==1 is intentionally not exercised here;
-    domain attachment is only used/recommended with domain_overlap>=2.'''
+    overlap0, including overlap0==1 -- a case the original condition
+    (`overlap0 > 1 and capping_groups == False`) missed.'''
     index_aln_l, index_clash_l, index_merge_l = get_residue_indices_for_assembly(
         overlap0=overlap0, current_overlap=overlap0, capping_groups=False,
         last_level=False, verbose=False)
@@ -23,10 +21,9 @@ def test_get_residue_indices_no_cap_offset_for_any_overlap(overlap0):
     assert align_begin2 == 0
 
 
-@pytest.mark.parametrize("overlap0", [2, 3])
+@pytest.mark.parametrize("overlap0", [1, 2])
 def test_get_residue_indices_cap_offset_when_capped(overlap0):
-    '''capping_groups=True keeps the existing e=1 offset unchanged. See note above on
-    why overlap0==1 is not parametrized on this branch.'''
+    '''capping_groups=True keeps the existing e=1 offset unchanged.'''
     index_aln_l, index_clash_l, index_merge_l = get_residue_indices_for_assembly(
         overlap0=overlap0, current_overlap=overlap0, capping_groups=True,
         last_level=False, verbose=False)
