@@ -121,15 +121,17 @@ Run tests
 
 A free web application to grow ensembles of disordered proteins can be found here https://bio-phys.pages.mpcdf.de/hcg-from-library/. As input, we use a pre-sampled dimer fragment library (https://gitlab.mpcdf.mpg.de/MPIBP-Hummer/hcg-fragment-library.git).
 
-## Branch "multiprocessing_hcg"
+## Parallel HCG
 
-We uploaded a speed-up version of HCG to the branch “multiprocessing_hcg”. Here, fragment assembly steps in one level are run in parallel. This version of HCG is also run in our web application of HCG.
-
-In this fork, this branch has been rebased on top of the terminal domain-attachment feature described above (`domain_id`/`domain_overlap`/`strip_cap_nterm`/`strip_cap_cterm`), so a folded domain can be attached while growth runs in parallel. RHCG has also been restored on this branch to a working implementation (it was reduced to a non-functional placeholder upstream) — it is not yet parallelized, only plain HCG is.
-
-### Single-stranded nucleic acid
-
-This branch also contains a slightly adapted, also parallelized version of HCG ("hct_fct_NA.py") to grow ensembles of disordered single-stranded nucleic acid (ssNA). For growing ssRNA polymers, we uploaded a pre-sampled fragment library here https://zenodo.org/records/8369324. In the adapted code, we added another function called "run_hcg_NA()" that can be used to run HCG. Please refer to Ref 5 for more detailed information.
+`hierarchical_chain_growth` runs each level's independent fragment-pair assemblies in
+parallel, using a `multiprocessing.Pool` sized from `os.cpu_count()` by default. Pass
+`num_threads=1` to force fully serial execution instead — e.g. when calling this from a
+context where starting subprocesses is unsafe or undesirable (a plain interactive/REPL
+session, some notebook setups, or a shared/HPC login node), or for debugging. This works
+together with the terminal domain-attachment feature described above (`domain_id`/
+`domain_overlap`/`strip_cap_nterm`/`strip_cap_cterm`), so a folded domain can be attached
+while growth runs in parallel. RHCG (`reweighted_hierarchical_chain_growth`) is not yet
+parallelized and always runs serially.
 
 ## References
 1 Hierarchical Ensembles of Intrinsically Disordered Proteins at Atomic Resolution in Molecular Dynamics Simulations.
