@@ -152,6 +152,11 @@ together with the terminal domain-attachment feature described above (`domain_id
 while growth runs in parallel. RHCG (`reweighted_hierarchical_chain_growth`) is not yet
 parallelized and always runs serially.
 
+Both functions print a `tqdm` progress bar to stderr by default, one per level,
+tracking how many of that level's independent fragment pairs have finished (each pair
+draws `kmax` accepted conformations via rejection sampling, so pairs can take a while,
+especially at a large domain junction). Pass `progress=False` to suppress it.
+
 ## References
 1 Hierarchical Ensembles of Intrinsically Disordered Proteins at Atomic Resolution in Molecular Dynamics Simulations.
 Lisa M. Pietrek, Lukas S. Stelzl, and Gerhard Hummer,

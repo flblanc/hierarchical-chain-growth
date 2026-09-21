@@ -14,6 +14,7 @@ import pathlib, shutil, os
 import MDAnalysis.analysis.distances as distances
 from multiprocessing import Pool
 from functools import partial
+from tqdm import tqdm
 from chain_growth.hcg_list import flatten
 
 def translate_concept(u1, u2, proline_2nd_posi, align_begin1, align_end1, 
@@ -340,7 +341,7 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
              dict_to_fragment_folder=None, rmsd_cut_off=0.6, clash_distance=2.0, capping_groups=True,
              ri_l=None, streamlit_progressbar=None, verbose=False, domain_id=None,
              domain_overlap=None, strip_cap_nterm=None, strip_cap_cterm=None,
-             num_threads=None):
+             num_threads=None, progress=True):
     """ perform hierarchical chain growth 
     assemble fragments/ pairs of fragments until reaching the full-length chain
     by calling _loop_func -> does the inner loop and calls fragment assembly
@@ -403,6 +404,14 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
         serial execution -- e.g. when calling this from a context where starting subprocesses
         is unsafe or undesirable (a plain interactive/REPL session, some notebook setups, or a
         shared/HPC login node), or for debugging.
+    progress : boolean, optional
+        whether to print a per-level tqdm progress bar to stderr, tracking how many of
+        the current level's independent fragment pairs have finished (each pair draws
+        `kmax` accepted conformations via rejection sampling, so pairs can take a
+        while, especially at a large, real domain junction). The default is True. Set
+        to False to suppress it -- e.g. when embedding this in another UI that has its
+        own progress reporting (see `streamlit_progressbar`), or to keep captured
+        output clean.
 
     Returns
     -------
@@ -460,7 +469,14 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
         # POOL LOOP application
         with Pool(level_num_threads) as p:
             func = partial(_loop_func, d)
-            results = p.map(func, pairs)
+            if progress:
+                # imap (not imap_unordered) preserves the same pairs-order guarantee
+                # p.map makes, which r_l's draw_indices=False lookup (r_l[m_i]) below
+                # relies on -- this only adds a progress bar, nothing else changes
+                results = list(tqdm(p.imap(func, pairs), total=len(pairs),
+                                     desc="Level {}/{}".format(level, number_hcg_levels)))
+            else:
+                results = p.map(func, pairs)
         if draw_indices:
             for r in results:
                 if r is not None:
@@ -789,7 +805,8 @@ def reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merg
 def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
              rmsd_cut_off=0.6, clash_distance=2.0, capping_groups=True,
              ri_l=None,  path2weights='weights/', theta=10.0,  verbose=False,
-             domain_id=None, domain_overlap=None, strip_cap_nterm=None, strip_cap_cterm=None):
+             domain_id=None, domain_overlap=None, strip_cap_nterm=None, strip_cap_cterm=None,
+             progress=True):
     """ perform reweighted hierarchical chain growth (+ ímportance sampling)
     assemble fragments (reweighted according to experimental data)
                         or pairs of fragments until reaching the full-length chain
@@ -829,16 +846,21 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
         see `hierarchical_chain_growth`. The default is None (defaults to `capping_groups`).
     strip_cap_cterm : boolean, optional
         see `hierarchical_chain_growth`. The default is None (defaults to `capping_groups`).
+    progress : boolean, optional
+        whether to print a per-level tqdm progress bar to stderr, tracking how many of
+        the current level's fragment pairs have finished. See `hierarchical_chain_growth`.
+        The default is True.
 
     Returns
     -------
     None.
     """
-    
+
     last_level = False
     k_max = kmax
-    
-    for m , fragment_l in enumerate(hcg_l): 
+    number_hcg_levels = len(hcg_l)
+
+    for m , fragment_l in enumerate(hcg_l):
         # folder to save assembled pair in this level (m+1)
         level = m+1
         # folder to get old pairs from previous level (m)
@@ -865,7 +887,11 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
             k_max = kmax
 
         c1 = 0
-        for m_i , pair_l in enumerate(fragment_l):
+        fragment_l_iter = enumerate(fragment_l)
+        if progress:
+            fragment_l_iter = tqdm(fragment_l_iter, total=len(fragment_l),
+                                    desc="Level {}/{}".format(level, number_hcg_levels))
+        for m_i , pair_l in fragment_l_iter:
             c2=c1+1
             proline_2nd_posi = False
             # if promotion of MD fragment in first level DO NOT define old_pair2
