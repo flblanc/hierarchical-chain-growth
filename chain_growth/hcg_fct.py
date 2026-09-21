@@ -415,7 +415,14 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
     i_it = 0
 
     cpu = os.cpu_count() if num_threads is None else num_threads
-    for m , fragment_l in enumerate(hcg_l): 
+    # Pool workers are forked, so they inherit an *identical* copy of this process's
+    # global NumPy RNG state; without reseeding, different workers would draw the same
+    # "random" frame-index sequence. Derive a SeedSequence from the current global state
+    # (so a prior np.random.seed() call still makes the whole run reproducible) and spawn
+    # one independent child seed per task below, so every worker reseeds itself before
+    # drawing any random frame indices.
+    seed_seq = np.random.SeedSequence(np.random.randint(0, 2**32 - 1))
+    for m , fragment_l in enumerate(hcg_l):
         # folder to save assembled pair in this level (m+1)
         level = m+1
         # folder to get old pairs from previous level (m)
@@ -439,7 +446,8 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
             level_num_threads = cpu
         else:
             level_num_threads = len(fragment_l)
-        pairs = [(m_i, pair_l) for m_i, pair_l in enumerate(fragment_l)]
+        child_seeds = seed_seq.spawn(len(fragment_l))
+        pairs = [(m_i, pair_l, child_seeds[m_i]) for m_i, pair_l in enumerate(fragment_l)]
         d = {"path0": path0, "path": path, 
              "dict_to_fragment_folder": dict_to_fragment_folder,
              "level": level, 'previous_level': previous_level,
@@ -479,10 +487,12 @@ def _loop_func(variables, pairs):
     ----------
     variables : dictionary
         variables needed for fragment assembly as defined in hcg function.
-    pairs : tuple of lists
-        pair_l of pairs need to be assembled per level
-        list of respective pair ids
-   
+    pairs : tuple
+        (m_i, pair_l, seed): pair_l of pairs need to be assembled per level, the
+        respective pair id, and a per-task numpy SeedSequence used to reseed this
+        (forked, and therefore otherwise RNG-state-identical) worker before any random
+        frame indices are drawn.
+
     Returns
     -------
     if draw_indices:
@@ -493,7 +503,10 @@ def _loop_func(variables, pairs):
     """
     
     # print(variables)
-    m_i, pair_l = pairs
+    m_i, pair_l, seed = pairs
+    # reseed: this worker is a forked copy of the parent process and otherwise starts
+    # with an identical global RNG state to every other worker (see hierarchical_chain_growth)
+    np.random.seed(seed.generate_state(4))
     path0 = variables["path0"]
     path = variables["path"]
     dict_to_fragment_folder = variables["dict_to_fragment_folder"]
