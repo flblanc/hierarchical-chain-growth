@@ -180,7 +180,12 @@ def prepare_domain_fragment(domain_pdb, out_dir):
         tleap) -- or rename the offending atoms -- and re-run.
     """
     u = mda.Universe(domain_pdb)
-    if len(u.select_atoms('type H')) == 0:
+    # name-based (not type-based): MDAnalysis's `type` is a *guessed* classification
+    # and is unreliable for at least some real-world PDBs (e.g. observed returning 0
+    # "type H" atoms for a GROMACS/AMBER-written structure that plainly has H, HA,
+    # HB1, ... in its atom names) -- "name H*" reads the PDB's own atom-name field
+    # directly, matching how the rest of this check (and the code it protects) works
+    if len(u.select_atoms('name H*')) == 0:
         raise ValueError(
             "domain_pdb '{}' has no hydrogen atoms. hierarchical_chain_growth's "
             "alignment at the domain junction requires the domain structure to carry "
