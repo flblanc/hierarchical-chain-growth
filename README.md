@@ -111,6 +111,23 @@ For attachment at the domain's N-terminus instead, pass `terminus='N'` to
 strip_cap_cterm=False`), so the domain's real C-terminal residue is kept while the free
 N-terminal end's cap is still stripped.
 
+### Attaching a domain when growing from the generic dimer library
+
+If the IDR is grown from the pre-sampled, generic dimer fragment library (see "Web
+application of HCG" below) instead of a purpose-simulated project library, the
+domain-facing fragment needs special handling: a plain 2-residue dimer can't supply
+the 3 real residues `domain_overlap=2` needs (2 shared with the domain, at least 1
+newly contributed), and `domain_overlap=1` isn't supported at the domain junction at
+all (see `chain_growth.fragment_list.build_domain_junction_fragment`'s docstring for
+the full derivation). That function builds the needed fragment anyway, with **no new
+simulation**: every one of the dimer library's 400 residue-pair combinations already
+exists in it, so it looks up the two ordinary dimers spanning the domain's own last 2
+residues and the IDR's first residue (or the mirror image, for N-terminal attachment),
+and merges them with the same ordinary mechanism used for any other internal HCG join.
+See `examples/run_chain_growth/run_hcg_domain_attachment_from_dimer_library.py` for
+the full worked example, which combines this with `run_hcg_from_dimer_library.py`'s
+approach for the rest of the IDR.
+
 ## Testing
 
 Run tests
