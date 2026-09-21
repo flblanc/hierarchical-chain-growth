@@ -42,7 +42,7 @@ prepared (e.g. from a short simulation, or sliced from a longer existing fragmen
 import os
 
 from chain_growth.hcg_list import make_hcl_l
-from chain_growth.fragment_list import generate_fragment_list
+from chain_growth.fragment_list import generate_fragment_list, prepare_domain_fragment
 from chain_growth.hcg_fct import hierarchical_chain_growth
 
 ################
@@ -87,9 +87,19 @@ for i, (res_a, res_b) in enumerate(fragment_l):
 ## the folded domain: attach at the N-terminus of the IDR ('N') or the C-terminus ('C')
 domain_id = 'domain'
 terminus = 'N'
+
+# prepare the domain as a rigid, single-frame MD-fragment folder, matching the
+# "pair0.pdb" + "pair.xtc" convention every ordinary MD fragment folder uses
+prepare_domain_fragment('folded_domain.pdb', '{}/MDfragments/{}'.format(path0, domain_id))
+
 # the one purpose-prepared fragment bridging the domain and the dimer-library-grown
-# IDR (see module docstring); like domain_id, its "pair0.pdb"/"pair.xtc" must already
-# exist under path0/MDfragments/<junction_id> before this script runs
+# IDR (see module docstring). Unlike domain_id, there's no library or simple structure
+# file to convert here -- it needs its own short simulation (or slicing from a longer
+# existing fragment), so its "pair0.pdb"/"pair.xtc" must already exist under
+# path0/MDfragments/<junction_id> before this script runs; prepare_domain_fragment
+# can still write it there once you have that single-conformation (or trajectory)
+# structure, e.g. prepare_domain_fragment('domain_junction.pdb', '{}/MDfragments/{}'
+# .format(path0, junction_id))
 junction_id = 'domain_junction'
 # residues the domain shares with junction_id's own overlap region (>=2; see module
 # docstring for why domain_overlap=1 isn't supported at this junction)
