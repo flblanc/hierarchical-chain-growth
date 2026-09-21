@@ -33,12 +33,26 @@ derivation.
 Every other IDR fragment doesn't touch the domain at all, so it's an ordinary
 overlap=1/capping_groups=True join, sourced from the dimer library exactly as in
 `run_hcg_from_dimer_library.py`.
+
+Speeding up the domain's own clash-checks (optional)
+--------------------------------------------------------
+The domain is by far the largest thing being clash-checked against at every level
+once it's merged in, and most of its own atoms are buried and geometrically
+unreachable by an external, non-penetrating IDR chain. `compute_domain_surface_mask`
+(requires the separate `freesasa` package: `pip install freesasa`) computes which
+atoms those are, once, and `prepare_domain_fragment`'s `surface_mask` argument bakes
+that into the prepared fragment so every later clash-check skips them -- often
+roughly halving the atom count checked against the domain. This is entirely
+optional and off by default; see both functions' own docstrings for the full
+derivation (including why a cheaper, dependency-free alternative was tried and
+rejected as unsafe).
 """
 import os
 
 from chain_growth.hcg_list import make_hcl_l
-from chain_growth.fragment_list import (build_domain_junction_fragment, dimer_library_fragment_dir,
-                                         generate_fragment_list, prepare_domain_fragment)
+from chain_growth.fragment_list import (build_domain_junction_fragment, compute_domain_surface_mask,
+                                         dimer_library_fragment_dir, generate_fragment_list,
+                                         prepare_domain_fragment)
 from chain_growth.hcg_fct import hierarchical_chain_growth
 
 ################
@@ -87,8 +101,11 @@ domain_overlap = 2
 kmax = 200
 
 # prepare the domain as a rigid, single-frame MD-fragment folder, matching the
-# "pair0.pdb" + "pair.xtc" convention every ordinary MD fragment folder uses
-prepare_domain_fragment(folded_domain_pdb, '{}/MDfragments/{}'.format(path0, domain_id))
+# "pair0.pdb" + "pair.xtc" convention every ordinary MD fragment folder uses.
+# Optional speedup (needs `pip install freesasa`; comment out to skip):
+surface_mask = compute_domain_surface_mask(folded_domain_pdb)
+prepare_domain_fragment(folded_domain_pdb, '{}/MDfragments/{}'.format(path0, domain_id),
+        surface_mask=surface_mask)
 
 # the one fragment bridging the domain and the dimer-library-grown IDR, built purely
 # from the dimer library -- no new simulation

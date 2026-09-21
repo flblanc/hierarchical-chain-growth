@@ -6,6 +6,7 @@ prepare a list of fragments with desired length + overlap from input sequence
 == IDP/ IDR to grow using (r)hcg
 """
 import MDAnalysis as mda
+import numpy as np
 import os
 import shutil
 
@@ -150,7 +151,7 @@ def generate_fragment_list(input_sequence, fragment_length, overlap, NA=False, n
     return fragment_list, overlaps
 
 
-def prepare_domain_fragment(domain_pdb, out_dir):
+def prepare_domain_fragment(domain_pdb, out_dir, surface_mask=None):
     """ prepare a rigid folded domain PDB as a single-frame MD-fragment folder, matching
     the "pair0.pdb" + "pair.xtc" convention every other MD fragment folder uses, so it
     can be loaded like any other fragment during hierarchical chain growth.
@@ -161,6 +162,16 @@ def prepare_domain_fragment(domain_pdb, out_dir):
         path to the folded domain's PDB structure (a single, rigid conformation)
     out_dir : string
         folder to write "pair0.pdb" and "pair.xtc" into, e.g. "MDfragments/<domain_id>"
+    surface_mask : numpy.ndarray of bool, optional
+        the result of `compute_domain_surface_mask(domain_pdb)`, one entry per atom
+        (True = exposed/keep, False = buried/safe to exclude from clash-checks). If
+        given, this gets baked into the written fragment's own B-factor column (1.0
+        for exposed, 0.0 for buried) -- a column `find_clashes` always reads for the
+        domain's own atoms (identified via `DOMAIN_SEGID`) to skip buried ones,
+        regardless of how many levels deep the domain ends up embedded within a
+        growing merged chain. B-factor survives every merge and residue-renumbering
+        step in this package untouched, unlike resid. The default is None (every
+        domain atom is checked, i.e. today's existing behavior).
 
     Returns
     -------
@@ -179,13 +190,18 @@ def prepare_domain_fragment(domain_pdb, out_dir):
         way, re-protonate with a tool that follows standard PDB/AMBER naming (e.g.
         tleap) -- or rename the offending atoms -- and re-run.
     """
+    # imported lazily to avoid a module-level dependency cycle with hcg_fct
+    # (see build_domain_junction_fragment for the same pattern)
+    from chain_growth.hcg_fct import DOMAIN_SEGID, HYDROGEN_NAME_SELECTION
+
     u = mda.Universe(domain_pdb)
     # name-based (not type-based): MDAnalysis's `type` is a *guessed* classification
     # and is unreliable for at least some real-world PDBs (e.g. observed returning 0
     # "type H" atoms for a GROMACS/AMBER-written structure that plainly has H, HA,
-    # HB1, ... in its atom names) -- "name H*" reads the PDB's own atom-name field
-    # directly, matching how the rest of this check (and the code it protects) works
-    if len(u.select_atoms('name H*')) == 0:
+    # HB1, ... in its atom names) -- matching the PDB's own atom-name field directly
+    # (HYDROGEN_NAME_SELECTION) is what the rest of this check (and the code it
+    # protects) relies on instead
+    if len(u.select_atoms(HYDROGEN_NAME_SELECTION)) == 0:
         raise ValueError(
             "domain_pdb '{}' has no hydrogen atoms. hierarchical_chain_growth's "
             "alignment at the domain junction requires the domain structure to carry "
@@ -201,9 +217,107 @@ def prepare_domain_fragment(domain_pdb, out_dir):
             "fragment libraries the domain gets joined to. Re-protonate with a tool "
             "that follows standard PDB/AMBER naming (e.g. tleap), or rename the "
             "offending atoms, and re-run.".format(domain_pdb))
+    # tag with DOMAIN_SEGID unconditionally (harmless if never used): lets
+    # hierarchical_chain_growth's optional domain_surface_mask optimization (see
+    # compute_domain_surface_mask) reliably find the domain's own atoms at any
+    # level, without needing this fragment re-prepared later just to enable it
+    if not hasattr(u.atoms, 'segids'):
+        u.add_TopologyAttr('segid')
+    u.atoms.segments.segids = DOMAIN_SEGID
+    if surface_mask is not None:
+        if len(surface_mask) != len(u.atoms):
+            raise ValueError(
+                "surface_mask has {} entries but domain_pdb '{}' has {} atoms -- "
+                "must be the result of compute_domain_surface_mask(domain_pdb), for "
+                "this same file".format(len(surface_mask), domain_pdb, len(u.atoms)))
+        if not hasattr(u.atoms, 'tempfactors'):
+            u.add_TopologyAttr('tempfactors')
+        # 1.0 = buried (explicitly excluded by find_clashes), 0.0 = exposed. This
+        # way round, not the reverse: every atom (domain or not) defaults to
+        # tempfactor=0.0 when never explicitly set, so "buried" must be the
+        # non-default value -- otherwise every domain prepared without surface_mask
+        # would look entirely buried and never get clash-checked at all
+        u.atoms.tempfactors = (~np.asarray(surface_mask, dtype=bool)).astype(float)
     os.makedirs(out_dir, exist_ok=True)
     u.atoms.write('{}/pair0.pdb'.format(out_dir))
     u.atoms.write('{}/pair.xtc'.format(out_dir), frames='all')
+
+
+def compute_domain_surface_mask(domain_pdb, sasa_threshold=1.0, probe_radius=1.4):
+    """ classify a prepared domain's own (heavy) atoms as solvent-exposed or buried,
+    for hierarchical_chain_growth's `domain_surface_mask` parameter: a
+    performance-only optimization that excludes buried atoms from clash-checking
+    against the domain, since they're geometrically unreachable by an external,
+    non-penetrating IDR chain without first clashing with a more exposed atom.
+
+    Since the domain is rigid (a single, fixed conformation for the whole run), this
+    only needs to be computed once and reused for every clash-check at every level,
+    however deep the domain ends up embedded within a growing merged chain -- its
+    own atoms stay identifiable throughout via `DOMAIN_SEGID` (see
+    `prepare_domain_fragment`).
+
+    Uses true solvent-accessible surface area (SASA), via the separate `freesasa`
+    package (`pip install freesasa`). A cheaper, dependency-free approximation
+    (counting nearby atoms as a burial proxy) was tried and rejected during
+    development: calibrated to be safe (no missed clashes), it excluded too few
+    atoms to be worth the added complexity; calibrated to exclude a useful
+    fraction, it risked classifying genuinely exposed atoms (tens of square
+    Angstrom of real solvent-accessible area) as buried -- a real risk of silently
+    missing a genuine clash, not just a performance tradeoff.
+
+    Parameters
+    ----------
+    domain_pdb : string
+        path to the folded domain's PDB structure (the same one passed to
+        `prepare_domain_fragment`)
+    sasa_threshold : float, optional
+        an atom is classified as buried (safe to exclude) if its own per-atom SASA,
+        in square Angstrom, is below this value. The default is 1.0 -- deliberately
+        small/conservative, since this only needs to identify atoms with
+        essentially zero solvent exposure, not merely "less exposed than average"
+    probe_radius : float, optional
+        solvent probe radius, in Angstrom, passed to freesasa. The default is 1.4
+        (water)
+
+    Returns
+    -------
+    exposed_mask : numpy.ndarray of bool
+        one entry per atom in `mda.Universe(domain_pdb).atoms`, in that same order;
+        True means "keep this atom in clash-checks" (exposed), False means "safe to
+        exclude" (buried). Hydrogens are always True here (SASA is computed on heavy
+        atoms only) since they're already excluded from clash-checking by
+        `chain_growth.hcg_fct.HYDROGEN_NAME_SELECTION` regardless
+
+    Raises
+    ------
+    ImportError
+        if the freesasa package isn't installed
+    """
+    # imported lazily to avoid a module-level dependency cycle with hcg_fct
+    # (see build_domain_junction_fragment for the same pattern)
+    from chain_growth.hcg_fct import HYDROGEN_NAME_SELECTION
+    try:
+        import freesasa
+    except ImportError as e:
+        raise ImportError(
+            "compute_domain_surface_mask requires the freesasa package: "
+            "pip install freesasa") from e
+
+    u = mda.Universe(domain_pdb)
+    heavy = u.select_atoms('not ({})'.format(HYDROGEN_NAME_SELECTION))
+
+    structure = freesasa.Structure()
+    for atom in heavy:
+        structure.addAtom(atom.name, atom.resname, str(atom.resid), 'A',
+                           *[float(x) for x in atom.position])
+    params = freesasa.Parameters({'probe-radius': probe_radius})
+    result = freesasa.calc(structure, params)
+    sasa = np.array([result.atomArea(i) for i in range(len(heavy))])
+    buried_heavy = sasa < sasa_threshold
+
+    exposed_mask = np.ones(len(u.atoms), dtype=bool)
+    exposed_mask[heavy.indices] = ~buried_heavy
+    return exposed_mask
 
 
 def add_domain_to_fragment_list(n_fragments, domain_id, terminus):

@@ -17,7 +17,26 @@ from functools import partial
 from tqdm import tqdm
 from chain_growth.hcg_list import flatten
 
-def translate_concept(u1, u2, proline_2nd_posi, align_begin1, align_end1, 
+# MDAnalysis's own `type`-based hydrogen guessing is unreliable and inconsistent
+# across the naming conventions actually seen in this project's own data: it
+# under-excludes (finds none at all) for at least one real GROMACS-written PDB, and
+# over-excludes (misclassifies genuine heavy atoms as hydrogen) for this project's
+# own AMBER-style MD fragment library. Matching the atom *name* directly instead
+# covers both conventions actually observed here: a leading "H" (standard/GROMACS,
+# e.g. "H", "HA", "HB1", "H01") and AMBER's digit-prefixed equivalent-hydrogen naming
+# for chemically-equivalent hydrogens (e.g. "1HD1", "2HD1", "3HD1").
+HYDROGEN_NAME_SELECTION = 'name H* or name [123]H*'
+
+# reserved segid tag (PDB's segid column is limited to 4 characters) marking a
+# prepared domain fragment's own atoms (see chain_growth.fragment_list's
+# prepare_domain_fragment). Unlike resid, segid is left untouched by this module's
+# merges and residue renumbering, so it reliably identifies the domain's atoms at
+# every level of a run, however deep the domain ends up embedded within a growing
+# merged chain -- used by find_clashes's optional domain-surface-only optimization
+# (see chain_growth.fragment_list.compute_domain_surface_mask)
+DOMAIN_SEGID = 'DOM'
+
+def translate_concept(u1, u2, proline_2nd_posi, align_begin1, align_end1,
                       align_begin2, align_end2):
     """ prepare a dictionary with atoms to align before the assembly step
     
@@ -93,13 +112,25 @@ def find_clashes(u1,u2, index1b, index2e,
         
     NOTE: MDAnalysis is inclusive! resid 1:2 -> selects residues 1+2
     """
-    l1 = u1.select_atoms("protein and not (type H) and not (resid {} and backbone) and not resid {}:{}".format(
+    # "segid {} and prop tempfactor > 0.5" matches only atoms explicitly marked
+    # buried by compute_domain_surface_mask + prepare_domain_fragment's
+    # surface_mask (see their docstrings); harmless no-op otherwise, since every
+    # atom defaults to tempfactor=0.0 (kept) unless a domain fragment was prepared
+    # with that option. MDAnalysis's selection language requires "prop" for numeric
+    # (as opposed to exact-match) property comparisons.
+    l1 = u1.select_atoms(
+        "protein and not ({}) and not (segid {} and prop tempfactor > 0.5) "
+        "and not (resid {} and backbone) and not resid {}:{}".format(
+                                                    HYDROGEN_NAME_SELECTION, DOMAIN_SEGID,
                                                     u1.atoms.residues[index1b].resid,
                                                     u1.atoms.residues[index1b+1].resid,
                                                     u1.atoms.residues[index1e].resid))
 
     # atom selection of u2 to scan for clashes
-    l2 = u2.select_atoms("protein and not (type H) and not resid 1:{} and not (resid {} and backbone)".format(
+    l2 = u2.select_atoms(
+        "protein and not ({}) and not (segid {} and prop tempfactor > 0.5) "
+        "and not resid 1:{} and not (resid {} and backbone)".format(
+                                                    HYDROGEN_NAME_SELECTION, DOMAIN_SEGID,
                                                     u2.atoms.residues[index2e-1].resid,
                                                     u2.atoms.residues[index2e].resid))
 

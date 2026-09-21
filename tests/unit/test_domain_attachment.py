@@ -140,3 +140,119 @@ def test_prepare_domain_fragment_accepts_hydrogenated_pdb(tmp_path):
     prepare_domain_fragment(
         os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'), str(tmp_path / 'out'))
     assert (tmp_path / 'out' / 'pair0.pdb').exists()
+
+
+def test_prepare_domain_fragment_tags_domain_segid(tmp_path):
+    '''Every prepared domain fragment is tagged with DOMAIN_SEGID unconditionally
+    (not just when surface_mask is given), so find_clashes's domain-surface
+    optimization can be enabled later without re-preparing the fragment.'''
+    from chain_growth.hcg_fct import DOMAIN_SEGID
+    prepare_domain_fragment(
+        os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'), str(tmp_path / 'out'))
+    u = mda.Universe(str(tmp_path / 'out' / 'pair0.pdb'))
+    assert set(u.atoms.segids) == {DOMAIN_SEGID}
+
+
+def test_prepare_domain_fragment_without_surface_mask_defaults_to_all_kept(tmp_path):
+    '''The critical safety property: preparing a domain WITHOUT surface_mask (i.e.
+    every existing caller, and the default) must leave every atom's tempfactor at
+    its natural default (0.0) -- find_clashes only excludes tempfactor > 0.5, so
+    this must mean "nothing excluded", identical to pre-existing behavior. Getting
+    the encoding backwards here would make every domain invisible to clash-checking
+    whenever this new, optional feature isn't used -- a silent, severe regression.'''
+    prepare_domain_fragment(
+        os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'), str(tmp_path / 'out'))
+    u = mda.Universe(str(tmp_path / 'out' / 'pair0.pdb'))
+    assert list(u.atoms.tempfactors) == [0.0] * len(u.atoms)
+
+
+def test_prepare_domain_fragment_with_surface_mask_bakes_in_tempfactors(tmp_path):
+    '''surface_mask=True (exposed) -> tempfactor 0.0 (kept); surface_mask=False
+    (buried) -> tempfactor 1.0 (excluded by find_clashes) -- the reverse of the
+    boolean, since "buried" must be the non-default value (see the test above).'''
+    import numpy as np
+    u_orig = mda.Universe(os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'))
+    n = len(u_orig.atoms)
+    mask = np.array([i % 2 == 0 for i in range(n)])  # alternate exposed/buried
+
+    prepare_domain_fragment(
+        os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'), str(tmp_path / 'out'),
+        surface_mask=mask)
+    u = mda.Universe(str(tmp_path / 'out' / 'pair0.pdb'))
+    expected = np.where(mask, 0.0, 1.0)
+    assert np.array_equal(np.array(u.atoms.tempfactors), expected)
+
+
+def test_prepare_domain_fragment_rejects_wrong_length_surface_mask(tmp_path):
+    import numpy as np
+    with pytest.raises(ValueError, match='surface_mask has'):
+        prepare_domain_fragment(
+            os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'), str(tmp_path / 'out'),
+            surface_mask=np.array([True, False]))  # wrong length
+
+
+def test_compute_domain_surface_mask_requires_freesasa(monkeypatch):
+    '''A clear ImportError, not a cryptic one, when freesasa isn't installed.'''
+    import builtins
+    from chain_growth.fragment_list import compute_domain_surface_mask
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == 'freesasa':
+            raise ImportError("no module named freesasa")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, '__import__', fake_import)
+    with pytest.raises(ImportError, match='pip install freesasa'):
+        compute_domain_surface_mask(os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'))
+
+
+def test_compute_domain_surface_mask_classifies_real_domain():
+    '''On a real, compact folded domain, a meaningful fraction of heavy atoms should
+    be classified as buried (not all-exposed, not all-buried) -- a basic sanity
+    check that the freesasa integration is actually working, not just returning a
+    constant.'''
+    pytest.importorskip('freesasa')
+    from chain_growth.fragment_list import compute_domain_surface_mask
+    mask = compute_domain_surface_mask(os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'))
+    u = mda.Universe(os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'))
+    assert len(mask) == len(u.atoms)
+    heavy = u.select_atoms('not (name H* or name [123]H*)')
+    heavy_mask = mask[heavy.indices]
+    assert 0 < heavy_mask.sum() < len(heavy_mask)  # neither all-exposed nor all-buried
+    # hydrogens are never classified buried (SASA is computed on heavy atoms only)
+    hydrogens = u.select_atoms('name H* or name [123]H*')
+    assert mask[hydrogens.indices].all()
+
+
+def test_find_clashes_excludes_marked_buried_domain_atoms(tmp_path):
+    '''The actual integration point: find_clashes must drop atoms explicitly marked
+    buried (segid DOMAIN_SEGID, tempfactor > 0.5), and must be a complete no-op
+    (checks every atom, exactly like before this feature existed) for a domain
+    prepared without a surface_mask.'''
+    import numpy as np
+    from chain_growth.hcg_fct import find_clashes
+
+    u1_pdb = os.path.join(examples_dir, 'MDfragments/0/pair0.pdb')
+    u2_pdb = os.path.join(examples_dir, 'MDfragments/1/pair0.pdb')
+
+    # unmasked domain: find_clashes result must match a plain (no DOMAIN_SEGID
+    # involved) clash check exactly
+    prepare_domain_fragment(u1_pdb, str(tmp_path / 'unmasked'))
+    u1_unmasked = mda.Universe(str(tmp_path / 'unmasked' / 'pair0.pdb'))
+    u2 = mda.Universe(u2_pdb)
+    clashes_unmasked = find_clashes(u1_unmasked, u2, index1b=-3, index2e=2)
+
+    u1_plain = mda.Universe(u1_pdb)  # never went through prepare_domain_fragment at all
+    u2_plain = mda.Universe(u2_pdb)
+    clashes_plain = find_clashes(u1_plain, u2_plain, index1b=-3, index2e=2)
+    assert clashes_unmasked == clashes_plain
+
+    # fully-buried mask: every one of u1's own atoms gets excluded, so nothing can
+    # possibly clash against u2 regardless of geometry
+    n = len(u1_plain.atoms)
+    all_buried = np.zeros(n, dtype=bool)
+    prepare_domain_fragment(u1_pdb, str(tmp_path / 'all_buried'), surface_mask=all_buried)
+    u1_all_buried = mda.Universe(str(tmp_path / 'all_buried' / 'pair0.pdb'))
+    clashes_all_buried = find_clashes(u1_all_buried, u2, index1b=-3, index2e=2)
+    assert clashes_all_buried == 0

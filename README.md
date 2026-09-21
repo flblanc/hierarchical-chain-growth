@@ -128,6 +128,24 @@ See `examples/run_chain_growth/run_hcg_domain_attachment_from_dimer_library.py` 
 the full worked example, which combines this with `run_hcg_from_dimer_library.py`'s
 approach for the rest of the IDR.
 
+### Speeding up clash-checks against a large domain (optional)
+
+Once merged in, the domain is by far the largest thing clash-checked against at
+every subsequent level, and most of its own atoms are buried -- geometrically
+unreachable by an external, non-penetrating IDR chain without first clashing with a
+more exposed atom. `chain_growth.fragment_list.compute_domain_surface_mask`
+(requires the separate `freesasa` package: `pip install freesasa`) computes true
+per-atom solvent-accessible surface area once for the (rigid, unchanging) domain, and
+`prepare_domain_fragment`'s `surface_mask` argument bakes that classification into
+the prepared fragment, so every later clash-check against the domain -- at every
+level, however deep it ends up embedded within a growing merged chain -- skips the
+buried atoms. On a real ~350-residue domain this excluded roughly half its heavy
+atoms. This is off by default and entirely optional; see both functions' own
+docstrings for the full derivation, including why a cheaper, dependency-free
+alternative (a neighbor-count burial heuristic) was tried and rejected during
+development for being unsafe at any exclusion rate worth having (either too weak to
+help, or aggressive enough to risk missing genuine clashes).
+
 ## Testing
 
 Run tests
