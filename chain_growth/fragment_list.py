@@ -165,9 +165,26 @@ def prepare_domain_fragment(domain_pdb, out_dir):
     Returns
     -------
     None.
+
+    Raises
+    ------
+    ValueError
+        if `domain_pdb` has no hydrogen atoms. `hierarchical_chain_growth`'s alignment
+        at the domain junction requires the domain structure to carry explicit
+        hydrogens, matching the MD-simulated fragment libraries it's joined to (a bare
+        crystal structure, cryo-EM model, or structure prediction typically has none).
+        Add them first -- e.g. with tleap, pdb2pqr, or PyMOL/Reduce -- and re-run.
     """
-    os.makedirs(out_dir, exist_ok=True)
     u = mda.Universe(domain_pdb)
+    if len(u.select_atoms('type H')) == 0:
+        raise ValueError(
+            "domain_pdb '{}' has no hydrogen atoms. hierarchical_chain_growth's "
+            "alignment at the domain junction requires the domain structure to carry "
+            "explicit hydrogens, matching the MD-simulated fragment libraries it's "
+            "joined to -- a bare crystal structure, cryo-EM model, or structure "
+            "prediction typically has none. Add hydrogens first (e.g. with tleap, "
+            "pdb2pqr, or PyMOL/Reduce) and re-run.".format(domain_pdb))
+    os.makedirs(out_dir, exist_ok=True)
     u.atoms.write('{}/pair0.pdb'.format(out_dir))
     u.atoms.write('{}/pair.xtc'.format(out_dir), frames='all')
 

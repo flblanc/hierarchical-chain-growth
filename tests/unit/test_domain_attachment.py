@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
+
+import MDAnalysis as mda
 import pytest
 
 from chain_growth.hcg_fct import get_residue_indices_for_assembly
 from chain_growth.hcg_list import make_hcl_l
-from chain_growth.fragment_list import add_domain_to_fragment_list
+from chain_growth.fragment_list import add_domain_to_fragment_list, prepare_domain_fragment
+
+test_dir = os.path.dirname(os.path.abspath(__file__))
+examples_dir = os.path.join(test_dir, '../../examples/')
 
 
 @pytest.mark.parametrize("overlap0", [1, 2])
@@ -93,3 +99,25 @@ def test_make_hcl_l_with_custom_fragment_ids():
     hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
     # level 1: domain (id 'domain') paired with fragment 0
     assert hcg_l[0][0] == ['domain', 0]
+
+
+def test_prepare_domain_fragment_rejects_hydrogen_free_pdb(tmp_path):
+    '''A folded-domain PDB with no explicit hydrogens (typical of a bare crystal
+    structure, cryo-EM model, or structure prediction) must be rejected outright with
+    a clear, actionable error -- not silently accepted, which would otherwise surface
+    much later as a cryptic MDAnalysis atom-count-mismatch SelectionError deep inside
+    a hierarchical_chain_growth run.'''
+    u = mda.Universe(os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'))
+    no_h_pdb = str(tmp_path / 'no_h_domain.pdb')
+    u.select_atoms('not type H').write(no_h_pdb)
+
+    with pytest.raises(ValueError, match='no hydrogen atoms'):
+        prepare_domain_fragment(no_h_pdb, str(tmp_path / 'out'))
+    assert not (tmp_path / 'out').exists()
+
+
+def test_prepare_domain_fragment_accepts_hydrogenated_pdb(tmp_path):
+    '''Baseline: a normally-hydrogenated structure is still accepted as before.'''
+    prepare_domain_fragment(
+        os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'), str(tmp_path / 'out'))
+    assert (tmp_path / 'out' / 'pair0.pdb').exists()
