@@ -68,13 +68,17 @@ def test_strip_cap_defaults_to_capping_groups():
 
 
 def test_add_domain_to_fragment_list_n_terminus():
+    '''terminus='N' attaches the IDR to the domain's N-terminus, so the domain is
+    placed last (after the IDR).'''
     fragment_ids = add_domain_to_fragment_list(n_fragments=4, domain_id='domain', terminus='N')
-    assert fragment_ids == ['domain', 0, 1, 2, 3]
+    assert fragment_ids == [0, 1, 2, 3, 'domain']
 
 
 def test_add_domain_to_fragment_list_c_terminus():
+    '''terminus='C' attaches the IDR to the domain's C-terminus, so the domain is
+    placed first (before the IDR).'''
     fragment_ids = add_domain_to_fragment_list(n_fragments=4, domain_id='domain', terminus='C')
-    assert fragment_ids == [0, 1, 2, 3, 'domain']
+    assert fragment_ids == ['domain', 0, 1, 2, 3]
 
 
 def test_add_domain_to_fragment_list_invalid_terminus():
@@ -85,7 +89,7 @@ def test_add_domain_to_fragment_list_invalid_terminus():
 def test_make_hcl_l_with_custom_fragment_ids():
     '''A custom fragment_ids list (e.g. with a domain id spliced in) must be used
     verbatim in place of the default 0..N-1 range, without renumbering.'''
-    fragment_ids = add_domain_to_fragment_list(n_fragments=3, domain_id='domain', terminus='N')
+    fragment_ids = add_domain_to_fragment_list(n_fragments=3, domain_id='domain', terminus='C')
     hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
     # level 1: domain (id 'domain') paired with fragment 0
     assert hcg_l[0][0] == ['domain', 0]

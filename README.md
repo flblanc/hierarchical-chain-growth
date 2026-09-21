@@ -72,11 +72,12 @@ conformation (not an ensemble); mid-sequence insertion into a domain is not supp
 **Fragment library requirement:** the domain-facing terminal MD fragment must be
 simulated so that its overlap residues are the domain's own real residues, not a
 synthetic ACE/NME cap -- exactly how ordinary IDR fragments already overlap each other.
-For example, for a C-terminal domain attachment, that fragment's simulated sequence
-should end in the domain's own first `domain_overlap` residues instead of a capping
-group. This fragment-library design happens during simulation setup, outside this code.
+For example, for attachment at the domain's C-terminus, that fragment's simulated
+sequence should end in the domain's own last `domain_overlap` residues instead of a
+capping group. This fragment-library design happens during simulation setup, outside
+this code.
 
-Worked example, attaching a domain at the IDR's C-terminus (see
+Worked example, attaching the IDR to a folded domain's C-terminus (see
 `examples/run_chain_growth/run_hcg_domain_attachment.py` for the full script):
 
 ```python
@@ -94,20 +95,21 @@ domain_id = 'domain'
 domain_overlap = 2  # residues shared between the domain and its neighboring fragment
 prepare_domain_fragment('folded_domain.pdb', 'MDfragments/{}'.format(domain_id))
 
-# splice the domain into the fragment order (terminus='N' attaches it at the other end)
+# splice the domain into the fragment order (terminus='N' attaches at the other end)
 fragment_ids = add_domain_to_fragment_list(len(fragment_l), domain_id, terminus='C')
 hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
 
-# strip_cap_cterm=False keeps the domain's real terminal residue instead of treating it
-# as a synthetic cap to discard; strip_cap_nterm=True still strips the free end's cap
+# strip_cap_nterm=False keeps the domain's real terminal residue instead of treating it
+# as a synthetic cap to discard; strip_cap_cterm=True still strips the free end's cap
 hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0='.', path='out/', kmax=100,
         capping_groups=True, domain_id=domain_id, domain_overlap=domain_overlap,
-        strip_cap_nterm=True, strip_cap_cterm=False)
+        strip_cap_nterm=False, strip_cap_cterm=True)
 ```
 
-For N-terminal attachment, pass `terminus='N'` to `add_domain_to_fragment_list` and swap
-the `strip_cap_*` flags (`strip_cap_nterm=False, strip_cap_cterm=True`), so the domain's
-real N-terminal residue is kept while the free C-terminal end's cap is still stripped.
+For attachment at the domain's N-terminus instead, pass `terminus='N'` to
+`add_domain_to_fragment_list` and swap the `strip_cap_*` flags (`strip_cap_nterm=True,
+strip_cap_cterm=False`), so the domain's real C-terminal residue is kept while the free
+N-terminal end's cap is still stripped.
 
 ## Testing
 

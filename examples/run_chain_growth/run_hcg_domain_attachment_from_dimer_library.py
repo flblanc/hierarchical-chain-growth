@@ -84,9 +84,9 @@ for i, (res_a, res_b) in enumerate(fragment_l):
         if not os.path.exists(link):
             os.symlink(os.path.join(src, fname), link)
 
-## the folded domain: attach at the N-terminus of the IDR ('N') or the C-terminus ('C')
+## the folded domain: attach the IDR to the domain's N-terminus ('N') or C-terminus ('C')
 domain_id = 'domain'
-terminus = 'N'
+terminus = 'C'
 
 # prepare the domain as a rigid, single-frame MD-fragment folder, matching the
 # "pair0.pdb" + "pair.xtc" convention every ordinary MD fragment folder uses
@@ -105,13 +105,14 @@ junction_id = 'domain_junction'
 # docstring for why domain_overlap=1 isn't supported at this junction)
 domain_overlap = 2
 
-## lists for the HCG: [domain, junction, ordinary dimer-library fragments...] (N-ter)
-## or [ordinary dimer-library fragments..., junction, domain] (C-ter)
+## lists for the HCG: [ordinary dimer-library fragments..., junction, domain]
+## (attaching at the domain's N-terminus) or [domain, junction, ordinary
+## dimer-library fragments...] (attaching at the domain's C-terminus)
 n_ordinary = len(fragment_l)
 if terminus == 'N':
-    fragment_ids = [domain_id, junction_id] + list(range(n_ordinary))
-elif terminus == 'C':
     fragment_ids = list(range(n_ordinary)) + [junction_id, domain_id]
+elif terminus == 'C':
+    fragment_ids = [domain_id, junction_id] + list(range(n_ordinary))
 else:
     raise ValueError("terminus must be 'N' or 'C'")
 hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
@@ -126,7 +127,7 @@ capping_groups = True
 ###########
 # strip_cap_nterm/strip_cap_cterm: the end where the domain attaches keeps its real
 # terminal residue (False); the free end keeps the usual synthetic-cap stripping (True).
-# For terminus='C' instead, swap these two (strip_cap_nterm=True, strip_cap_cterm=False).
+# For terminus='N' instead, swap these two (strip_cap_nterm=True, strip_cap_cterm=False).
 hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax=kmax,
         capping_groups=capping_groups, domain_id=domain_id, domain_overlap=domain_overlap,
         strip_cap_nterm=False, strip_cap_cterm=True) #, verbose=True)

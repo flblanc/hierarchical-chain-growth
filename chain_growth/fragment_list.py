@@ -193,8 +193,12 @@ def add_domain_to_fragment_list(n_fragments, domain_id, terminus):
         id of the folded domain's MDfragments folder; must not collide with `0, ...,
         n_fragments - 1`
     terminus : string
-        'N' to attach the domain at the N-terminus (domain placed first), 'C' to
-        attach it at the C-terminus (domain placed last)
+        which of the domain's own termini the IDR attaches to. 'N' attaches the IDR to
+        the domain's N-terminus (the domain's own N-terminal residues form the
+        junction, so the domain is placed *last* in the returned list, after the
+        IDR); 'C' attaches the IDR to the domain's C-terminus (the domain's own
+        C-terminal residues form the junction, so the domain is placed *first*,
+        before the IDR)
 
     Returns
     -------
@@ -204,8 +208,8 @@ def add_domain_to_fragment_list(n_fragments, domain_id, terminus):
     """
     fragment_ids = list(range(n_fragments))
     if terminus == 'N':
-        return [domain_id] + fragment_ids
-    elif terminus == 'C':
         return fragment_ids + [domain_id]
+    elif terminus == 'C':
+        return [domain_id] + fragment_ids
     else:
         raise ValueError("terminus must be 'N' or 'C'")

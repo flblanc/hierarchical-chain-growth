@@ -40,7 +40,9 @@ def _prepare_domain_fixture(out_dir):
     domain_atoms.write(os.path.join(out_dir, 'pair.xtc'), frames='all')
 
 
-def test_domain_attachment_n_terminus(tmp_path):
+def test_domain_attachment_c_terminus(tmp_path):
+    '''Domain placed first, IDR growing off its C-terminal end (its own N-terminal
+    residue, ACE, is the real terminus that's kept).'''
     domain_id = 'domain'
     domain_overlap = 2
     n_real_fragments = 14  # fragments 1..14 of the truncated tauK18 example
@@ -105,7 +107,9 @@ def test_domain_attachment_n_terminus(tmp_path):
     assert sequence_hcg == sequence_ref
 
 
-def test_domain_attachment_c_terminus(tmp_path):
+def test_domain_attachment_n_terminus(tmp_path):
+    '''Domain placed last, IDR growing off its N-terminal end (its own C-terminal
+    residue, NME, is the real terminus that's kept).'''
     domain_id = 'domain'
     domain_overlap = 2
     n_real_fragments = 15  # fragments 0..14 of the truncated tauK18 example

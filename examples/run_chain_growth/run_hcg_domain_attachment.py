@@ -11,8 +11,9 @@ so that its overlap residues are the domain's own real residues, not a synthetic
 ACE/NME cap -- exactly how ordinary IDR fragments already overlap each other (see
 `chain_growth.fragment_list.add_domain_to_fragment_list`'s docstring). That fragment
 library design happens outside this code, during simulation setup: prepare the
-domain-facing fragment's sequence to genuinely include the domain's last (N-ter case)
-or first (C-ter case) `domain_overlap` residues, rather than capping that end.
+domain-facing fragment's sequence to genuinely include the domain's last (attaching at
+the domain's C-terminus, `terminus='C'`) or first (attaching at the domain's
+N-terminus, `terminus='N'`) `domain_overlap` residues, rather than capping that end.
 """
 from chain_growth.hcg_list import make_hcl_l
 from chain_growth.fragment_list import (generate_fragment_list, add_domain_to_fragment_list,
@@ -43,10 +44,10 @@ overlap = 2
 # the overlap between e.g., the two last fragments can vary
 fragment_l, overlaps_d = generate_fragment_list(sequence_f, fragment_length, overlap)
 
-## the folded domain: attach at the N-terminus of the IDR ('N') or the C-terminus ('C')
+## the folded domain: attach the IDR to the domain's N-terminus ('N') or C-terminus ('C')
 domain_id = 'domain'
 domain_overlap = 2
-terminus = 'N'
+terminus = 'C'
 
 # prepare the domain as a rigid, single-frame MD-fragment folder, matching the
 # "pair0.pdb" + "pair.xtc" convention every ordinary MD fragment folder uses
