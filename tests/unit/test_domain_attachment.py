@@ -116,6 +116,25 @@ def test_prepare_domain_fragment_rejects_hydrogen_free_pdb(tmp_path):
     assert not (tmp_path / 'out').exists()
 
 
+def test_prepare_domain_fragment_rejects_nonstandard_hydrogen_naming(tmp_path):
+    '''Some protonation tools name hydrogens generically (e.g. sequentially numbered
+    "H01", "H02", ...) instead of the standard PDB/AMBER "H" for the backbone amide
+    proton that hierarchical_chain_growth's alignment hardcodes. Having *some*
+    hydrogens isn't enough -- this must be rejected too, with a message that points at
+    the actual naming problem (a real, reproduced case: a domain PDB re-protonated
+    this way still crashed with the same atom-count-mismatch SelectionError as having
+    no hydrogens at all).'''
+    u = mda.Universe(os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'))
+    renamed_pdb = str(tmp_path / 'nonstandard_h_domain.pdb')
+    hydrogens = u.select_atoms('type H')
+    hydrogens.names = ['H{:02d}'.format(i) for i in range(len(hydrogens))]
+    u.atoms.write(renamed_pdb)
+
+    with pytest.raises(ValueError, match='none literally named "H"'):
+        prepare_domain_fragment(renamed_pdb, str(tmp_path / 'out'))
+    assert not (tmp_path / 'out').exists()
+
+
 def test_prepare_domain_fragment_accepts_hydrogenated_pdb(tmp_path):
     '''Baseline: a normally-hydrogenated structure is still accepted as before.'''
     prepare_domain_fragment(

@@ -169,11 +169,15 @@ def prepare_domain_fragment(domain_pdb, out_dir):
     Raises
     ------
     ValueError
-        if `domain_pdb` has no hydrogen atoms. `hierarchical_chain_growth`'s alignment
-        at the domain junction requires the domain structure to carry explicit
-        hydrogens, matching the MD-simulated fragment libraries it's joined to (a bare
-        crystal structure, cryo-EM model, or structure prediction typically has none).
-        Add them first -- e.g. with tleap, pdb2pqr, or PyMOL/Reduce -- and re-run.
+        if `domain_pdb` has no hydrogen atoms, or has hydrogens but none literally
+        named "H" (the backbone amide hydrogen). `hierarchical_chain_growth`'s
+        alignment at the domain junction hardcodes that exact atom name, matching the
+        MD-simulated fragment libraries the domain gets joined to (which always use
+        it) -- a bare crystal structure, cryo-EM model, or structure prediction
+        typically has no hydrogens at all, and generic protonation tools sometimes
+        name them differently (e.g. sequentially numbered "H01", "H02", ...). Either
+        way, re-protonate with a tool that follows standard PDB/AMBER naming (e.g.
+        tleap) -- or rename the offending atoms -- and re-run.
     """
     u = mda.Universe(domain_pdb)
     if len(u.select_atoms('type H')) == 0:
@@ -184,6 +188,14 @@ def prepare_domain_fragment(domain_pdb, out_dir):
             "joined to -- a bare crystal structure, cryo-EM model, or structure "
             "prediction typically has none. Add hydrogens first (e.g. with tleap, "
             "pdb2pqr, or PyMOL/Reduce) and re-run.".format(domain_pdb))
+    if len(u.select_atoms('name H')) == 0:
+        raise ValueError(
+            "domain_pdb '{}' has hydrogen atoms, but none literally named \"H\" (the "
+            "backbone amide hydrogen). hierarchical_chain_growth's alignment at the "
+            "domain junction hardcodes that exact atom name, matching the MD-simulated "
+            "fragment libraries the domain gets joined to. Re-protonate with a tool "
+            "that follows standard PDB/AMBER naming (e.g. tleap), or rename the "
+            "offending atoms, and re-run.".format(domain_pdb))
     os.makedirs(out_dir, exist_ok=True)
     u.atoms.write('{}/pair0.pdb'.format(out_dir))
     u.atoms.write('{}/pair.xtc'.format(out_dir), frames='all')
