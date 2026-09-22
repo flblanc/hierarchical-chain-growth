@@ -343,13 +343,59 @@ def _is_proline_at_alignment_end(u2, index_aln_l):
     return bool(res2_u2.residues.resnames == 'PRO')
 
 
-def _attempt_merge(u1, u2, select, index_clash_l, index_merge_l, rmsd_cut_off, clash_distance):
+def _unify_domain_segid(u, domain_segid):
+    """ relabel every atom's segid (and chainID, if present) to match the
+    non-domain atoms' own value, erasing the domain/non-domain distinction from a
+    fully-assembled chain's output.
+
+    `prepare_domain_fragment` tags the domain's own atoms with `domain_segid` (see
+    `DOMAIN_SEGID`) so `find_clashes` can reliably keep excluding buried domain
+    atoms at every level, however deep the domain ends up embedded within a
+    growing merged chain. Once assembly is finished, though, the domain and the
+    grown IDR are one single, covalently continuous molecule -- carrying that
+    internal bookkeeping tag (and whatever separate chainID the domain's original
+    source PDB happened to use) into the finished output would misrepresent it as
+    two separate molecules/chains to anything reading segid or chainID. This is
+    meant to be called only on that final, no-more-clash-checks-coming merge (see
+    its callers' `relabel_domain_segid` parameter), never on an intermediate one.
+
+    Parameters
+    ----------
+    u : universe
+        a freshly merge_universe'd universe (modified in place)
+    domain_segid : string
+        the segid marking the domain's own atoms, i.e. `DOMAIN_SEGID`
+    """
+    domain_mask = u.atoms.segids == domain_segid
+    if not domain_mask.any() or domain_mask.all():
+        # nothing to unify: either no domain atoms present (this merge never
+        # touched the domain), or every atom is domain-tagged (shouldn't happen for
+        # a real domain-attachment run, since the whole point is joining the domain
+        # to an IDR) -- either way, silently do nothing rather than guess
+        return
+    non_domain = u.atoms[~domain_mask]
+    u.atoms.segments.segids = non_domain.segids[0]
+    if hasattr(u.atoms, 'chainIDs'):
+        u.atoms.chainIDs = non_domain.chainIDs[0]
+
+
+def _attempt_merge(u1, u2, select, index_clash_l, index_merge_l, rmsd_cut_off, clash_distance,
+                   relabel_domain_segid=None):
     """ attempt one rejection-sampling trial: align u1/u2's currently-loaded frames,
     and merge them if both the RMSD and clash-count criteria pass.
 
     Shared by `fragment_assembly` and `reweighted_fragment_assembly` -- the one
     difference between them is how the next frame to try is drawn (uniformly vs.
     weighted), not this per-trial accept/reject/merge logic.
+
+    Parameters
+    ----------
+    relabel_domain_segid : string, optional
+        when given (as `DOMAIN_SEGID`), a successful merge gets its domain/non-domain
+        segid and chainID distinction erased via `_unify_domain_segid` before being
+        returned -- callers pass this only for the truly final merge of a
+        domain-attachment run (see `_unify_domain_segid`'s own docstring for why).
+        The default is None (no relabeling, unchanged pre-existing behavior).
 
     Returns
     -------
@@ -363,5 +409,8 @@ def _attempt_merge(u1, u2, select, index_clash_l, index_merge_l, rmsd_cut_off, c
         clashes = find_clashes(u1, u2, index1b=index_clash_l[0], index2e=index_clash_l[1],
                               clash_radius=clash_distance)
         if clashes < 1:
-            return merge_universe(u1, u2, *index_merge_l)
+            u = merge_universe(u1, u2, *index_merge_l)
+            if relabel_domain_segid is not None:
+                _unify_domain_segid(u, relabel_domain_segid)
+            return u
     return None

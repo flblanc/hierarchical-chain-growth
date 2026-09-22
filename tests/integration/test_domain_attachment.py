@@ -20,7 +20,9 @@ import os
 
 import MDAnalysis as mda
 
-from chain_growth.fragment_list import add_domain_to_fragment_list, generate_fragment_list, get_sequence
+from chain_growth.assembly import DOMAIN_SEGID
+from chain_growth.fragment_list import (add_domain_to_fragment_list, generate_fragment_list,
+                                         get_sequence, prepare_domain_fragment)
 from chain_growth.hcg_fct import hierarchical_chain_growth
 from chain_growth.hcg_list import make_hcl_l
 
@@ -105,6 +107,68 @@ def test_domain_attachment_c_terminus(tmp_path):
     sequence_hcg = get_sequence(str(final_pdb), NA=False).get_sequence_list()[1:]
     sequence_ref = get_sequence(sequence_f, NA=False).get_sequence_list()
     assert sequence_hcg == sequence_ref
+
+
+def test_domain_attachment_unifies_segid_only_at_final_level(tmp_path):
+    '''Once the domain is merged into the growing chain, DOMAIN_SEGID must stay on
+    the domain's own atoms at every intermediate level (find_clashes relies on it
+    for the domain-surface-only clash-check optimization at every subsequent
+    level), and only get erased -- so the final output looks like one single,
+    covalently continuous molecule rather than two -- once assembly is actually
+    finished.'''
+    domain_id = 'domain'
+    domain_overlap = 2
+    n_real_fragments = 14
+
+    mdfragments_dir = tmp_path / 'MDfragments'
+    for i in range(2, n_real_fragments + 1):
+        src = os.path.join(examples_dir, 'MDfragments', str(i))
+        dst = mdfragments_dir / str(i)
+        os.makedirs(dst)
+        for fname in ('pair0.pdb', 'pair.xtc'):
+            os.symlink(os.path.join(src, fname), dst / fname)
+
+    fragment1_dst = mdfragments_dir / '1'
+    os.makedirs(fragment1_dst)
+    u_fragment1 = mda.Universe(os.path.join(examples_dir, 'MDfragments/1/pair0.pdb'))
+    fragment1_atoms = u_fragment1.select_atoms('not resname ACE')
+    fragment1_atoms.write(str(fragment1_dst / 'pair0.pdb'))
+    fragment1_atoms.write(str(fragment1_dst / 'pair.xtc'), frames='all')
+
+    # unlike _prepare_domain_fixture (used by the other tests in this file), this
+    # goes through the real prepare_domain_fragment, so the domain's atoms actually
+    # get tagged with DOMAIN_SEGID -- required to exercise the relabeling this test
+    # is about
+    fragment0_pdb = os.path.join(examples_dir, 'MDfragments/0/pair0.pdb')
+    u_fragment0 = mda.Universe(fragment0_pdb)
+    domain_src_pdb = tmp_path / 'domain_src.pdb'
+    u_fragment0.select_atoms('not resname NME').write(str(domain_src_pdb))
+    prepare_domain_fragment(str(domain_src_pdb), str(mdfragments_dir / domain_id))
+
+    sequence_f = os.path.join(examples_dir, 'truncated_tauK18.fasta')
+    _, overlaps_d = generate_fragment_list(sequence_f, fragment_length=5, overlap=2)
+
+    fragment_ids = [domain_id] + list(range(1, n_real_fragments + 1))
+    hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
+    assert len(hcg_l) > 1  # this test needs a real intermediate level to check
+
+    out_dir = tmp_path / 'out'
+    hierarchical_chain_growth(
+        hcg_l, promo_l, overlaps_d, str(tmp_path), str(out_dir), kmax=5,
+        capping_groups=True, domain_id=domain_id, domain_overlap=domain_overlap,
+        strip_cap_nterm=False, strip_cap_cterm=True)
+
+    level1_pdb = out_dir / '1' / domain_id / 'pair0.pdb'
+    u_level1 = mda.Universe(str(level1_pdb))
+    assert DOMAIN_SEGID in set(u_level1.atoms.segids)
+    assert len(set(u_level1.atoms.segids)) == 2
+
+    final_level = len(hcg_l)
+    final_pdb = out_dir / str(final_level) / domain_id / 'pair0.pdb'
+    u_final = mda.Universe(str(final_pdb))
+    assert DOMAIN_SEGID not in set(u_final.atoms.segids)
+    assert len(set(u_final.atoms.segids)) == 1
+    assert len(set(u_final.atoms.chainIDs)) == 1
 
 
 def test_domain_attachment_n_terminus(tmp_path):

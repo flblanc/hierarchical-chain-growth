@@ -77,6 +77,15 @@ sequence should end in the domain's own last `domain_overlap` residues instead o
 capping group. This fragment-library design happens during simulation setup, outside
 this code.
 
+**Output segid/chainID:** while the domain is being merged in, its own atoms keep a
+distinct segid/chainID from the rest of the growing chain (an internal bookkeeping tag
+that lets `find_clashes` reliably keep excluding buried domain atoms at every level, see
+"Speeding up clash-checks against a large domain" below). Once assembly finishes, the
+domain and the grown IDR are one single, covalently continuous molecule, so the final
+output's segid and chainID are unified across every atom to reflect that -- only the
+truly last merge gets relabeled; every intermediate level's output still carries the
+distinct tag, since later levels still need it.
+
 Worked example, attaching the IDR to a folded domain's C-terminus (see
 `examples/run_chain_growth/run_hcg_domain_attachment.py` for the full script):
 

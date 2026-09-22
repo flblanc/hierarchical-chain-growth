@@ -23,7 +23,8 @@ from chain_growth.assembly import (
 
 
 def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
-         rmsd_cut_off, clash_distance, kmax, ri_l=None, draw_indices=True):
+         rmsd_cut_off, clash_distance, kmax, ri_l=None, draw_indices=True,
+         relabel_domain_segid=None):
     """ assemble the fragments to pairs
     
     Parameters
@@ -53,6 +54,9 @@ def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
         if None: draw indices randomly
     draw_indices : booolean
         if new random integers == frame indices are drawn or else taken from a input array.
+    relabel_domain_segid : string, optional
+        see `chain_growth.assembly._attempt_merge`; pass `DOMAIN_SEGID` only for the
+        truly final merge of a domain-attachment run. The default is None.
 
     Returns
     -------
@@ -62,7 +66,7 @@ def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
     else:
         None
     """
-    
+
     k = 0
     assembly_atempt = 0
 
@@ -78,7 +82,8 @@ def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
     # with too small a kmax has no other conformation to fall back on)
     if draw_indices and u1.trajectory.n_frames == 1 and u2.trajectory.n_frames == 1:
         if _attempt_merge(u1, u2, select, index_clash_l, index_merge_l,
-                          rmsd_cut_off, clash_distance) is None:
+                          rmsd_cut_off, clash_distance,
+                          relabel_domain_segid=relabel_domain_segid) is None:
             raise ValueError(
                 "fragment_assembly: both fragments have only one frame, so there is "
                 "only one possible alignment/clash trial, and it failed (RMSD or "
@@ -105,7 +110,8 @@ def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
         # and assemble the subsequent fragments if both criteria pass
         assembly_atempt += 1
         u = _attempt_merge(u1, u2, select, index_clash_l, index_merge_l,
-                           rmsd_cut_off, clash_distance)
+                           rmsd_cut_off, clash_distance,
+                           relabel_domain_segid=relabel_domain_segid)
         if u is not None:
             if writePDB :
                # save atom positions + topology for first pair in a pdb file
@@ -421,11 +427,19 @@ def _loop_func(variables, pairs):
             print('fragment 2 ',
                   u2.select_atoms('{}'.format(select['reference'])).residues.resnames)
  
+        # once assembly finishes (last_level), the domain and the grown IDR are one
+        # single, covalently continuous molecule -- erase DOMAIN_SEGID's internal
+        # bookkeeping tag (needed by find_clashes at every earlier level, see its
+        # own docstring) from the output instead of leaving it looking like two
+        # separate molecules/chains
+        relabel_domain_segid = DOMAIN_SEGID if (last_level and domain_id is not None) else None
+
         # assemble the fragments into pairs
         # (or pairs into pairs of pairs)
         if  draw_indices:
             rs = fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
-                              rmsd_cut_off, clash_distance,  kmax=k_max)
+                              rmsd_cut_off, clash_distance,  kmax=k_max,
+                              relabel_domain_segid=relabel_domain_segid)
             ###############
             #r_l.append(rs)
             ###############
@@ -434,7 +448,7 @@ def _loop_func(variables, pairs):
             rs = r_l[m_i]
             fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
                               rmsd_cut_off, clash_distance,  kmax=k_max, ri_l=rs,
-                              draw_indices=draw_indices)
+                              draw_indices=draw_indices, relabel_domain_segid=relabel_domain_segid)
             return None
  
 

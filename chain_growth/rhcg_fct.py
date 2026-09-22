@@ -15,13 +15,13 @@ import MDAnalysis as mda
 import pathlib, shutil, os
 from tqdm import tqdm
 from chain_growth.assembly import (
-    translate_concept, get_residue_indices_for_assembly, _resolve_old_pairs,
+    DOMAIN_SEGID, translate_concept, get_residue_indices_for_assembly, _resolve_old_pairs,
     _resolve_pair_overlap, _is_proline_at_alignment_end, _attempt_merge)
 
 
 def reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
          rmsd_cut_off, clash_distance, kmax, w_l, ri_l=None, draw_indices=True,
-         chain_weights_prev_l=None):
+         chain_weights_prev_l=None, relabel_domain_segid=None):
     """ assemble the fragments to pairs
     
     Parameters
@@ -61,8 +61,11 @@ def reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merg
         array with stored product of weights cW1 * cW2 of assembled fragments / pairs from previous level
         eq 5 in stelzl at al JACS Au 2022
         DO NOT USE as fragment weight to draw random frame - not yet normalized!
-        
-        
+    relabel_domain_segid : string, optional
+        see `chain_growth.assembly._attempt_merge`; pass `DOMAIN_SEGID` only for the
+        truly final merge of a domain-attachment run. The default is None.
+
+
     Returns
     -------
     if draw_indices:
@@ -95,7 +98,8 @@ def reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merg
     # for the same guard, and its full rationale)
     if draw_indices and u1.trajectory.n_frames == 1 and u2.trajectory.n_frames == 1:
         if _attempt_merge(u1, u2, select, index_clash_l, index_merge_l,
-                          rmsd_cut_off, clash_distance) is None:
+                          rmsd_cut_off, clash_distance,
+                          relabel_domain_segid=relabel_domain_segid) is None:
             raise ValueError(
                 "reweighted_fragment_assembly: both fragments have only one frame, "
                 "so there is only one possible alignment/clash trial, and it failed "
@@ -124,7 +128,8 @@ def reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merg
         # and assemble the subsequent fragments if both criteria pass
         assembly_atempt += 1
         u = _attempt_merge(u1, u2, select, index_clash_l, index_merge_l,
-                           rmsd_cut_off, clash_distance)
+                           rmsd_cut_off, clash_distance,
+                           relabel_domain_segid=relabel_domain_segid)
         if u is not None:
             if writePDB :
                # save atom positions + topology for first pair in a pdb file
@@ -305,6 +310,12 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
             o, pair_overlap0, pair_capping_groups = _resolve_pair_overlap(
                     pair_l, old_pair1, old_pair2, domain_id, domain_overlap,
                     overlap, overlaps_d, capping_groups)
+            # once assembly finishes (last_level), the domain and the grown IDR are
+            # one single, covalently continuous molecule -- erase DOMAIN_SEGID's
+            # internal bookkeeping tag (needed by find_clashes at every earlier
+            # level, see its own docstring) from the output instead of leaving it
+            # looking like two separate molecules/chains
+            relabel_domain_segid = DOMAIN_SEGID if (last_level and domain_id is not None) else None
 
             # get indices for assembly
             index_aln_l, index_clash_l, index_merge_l = get_residue_indices_for_assembly(
@@ -333,14 +344,16 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
                 
                 rs, acw_mi = reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
                                   rmsd_cut_off, clash_distance,  kmax=k_max, w_l=w_l,
-                                  chain_weights_prev_l=chain_weights_prev_l)
+                                  chain_weights_prev_l=chain_weights_prev_l,
+                                  relabel_domain_segid=relabel_domain_segid)
                 r_l.append(rs)
                 assembled_chain_weights.append(acw_mi)
             else:
                 rs = r_l[m_i]
                 acw_mi = reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
                                   rmsd_cut_off, clash_distance,  kmax=k_max, w_l=w_l, ri_l=rs,
-                                  draw_indices=draw_indices, chain_weights_prev_l=chain_weights_prev_l)
+                                  draw_indices=draw_indices, chain_weights_prev_l=chain_weights_prev_l,
+                                  relabel_domain_segid=relabel_domain_segid)
                 assembled_chain_weights.append(acw_mi)
             c1 += 2
         if draw_indices:

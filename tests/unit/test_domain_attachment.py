@@ -298,3 +298,79 @@ def test_reweighted_fragment_assembly_raises_on_single_frame_deterministic_failu
             u1, u2, dire=str('unused'), select={}, index_clash_l=[0, 0],
             index_merge_l=[0, -1, 0, -1], rmsd_cut_off=0.6, clash_distance=2.0,
             kmax=1, w_l=[np.array([1.0]), np.array([1.0])])
+
+
+def test_unify_domain_segid_merges_domain_and_idr_into_one(tmp_path):
+    '''Once the domain and the grown IDR are merged, they're a single, covalently
+    continuous molecule -- _unify_domain_segid must erase DOMAIN_SEGID's internal
+    bookkeeping tag (and the domain's separate chainID) so the output reflects
+    that, rather than looking like two separate molecules/chains.'''
+    from chain_growth.assembly import DOMAIN_SEGID, _unify_domain_segid, merge_universe
+
+    domain_pdb = os.path.join(examples_dir, 'MDfragments/0/pair0.pdb')
+    idr_pdb = os.path.join(examples_dir, 'MDfragments/1/pair0.pdb')
+    prepare_domain_fragment(domain_pdb, str(tmp_path / 'domain'))
+
+    u1 = mda.Universe(str(tmp_path / 'domain' / 'pair0.pdb'))
+    u2 = mda.Universe(idr_pdb)
+    u = merge_universe(u1, u2, 0, -1, 0, -1)
+
+    segids_before = set(u.atoms.segids)
+    assert DOMAIN_SEGID in segids_before and len(segids_before) == 2
+    assert len(set(u.atoms.chainIDs)) == 2
+
+    _unify_domain_segid(u, DOMAIN_SEGID)
+
+    segids_after = set(u.atoms.segids)
+    assert len(segids_after) == 1 and DOMAIN_SEGID not in segids_after
+    assert len(set(u.atoms.chainIDs)) == 1
+
+
+def test_unify_domain_segid_noop_without_domain_atoms():
+    '''Called on a universe with no DOMAIN_SEGID-tagged atoms at all (e.g. an
+    ordinary, domain-free HCG run), _unify_domain_segid must do nothing rather than
+    guess -- there's no "other" value to unify towards.'''
+    from chain_growth.assembly import DOMAIN_SEGID, _unify_domain_segid
+
+    u = mda.Universe(os.path.join(examples_dir, 'MDfragments/1/pair0.pdb'))
+    segids_before = list(u.atoms.segids)
+    chainids_before = list(u.atoms.chainIDs)
+
+    _unify_domain_segid(u, DOMAIN_SEGID)
+
+    assert list(u.atoms.segids) == segids_before
+    assert list(u.atoms.chainIDs) == chainids_before
+
+
+def test_attempt_merge_relabels_domain_segid_only_when_requested(tmp_path):
+    '''_attempt_merge must leave DOMAIN_SEGID intact by default (every intermediate
+    HCG level relies on it for find_clashes's domain-surface-only optimization),
+    and only relabel when explicitly asked via relabel_domain_segid -- the caller's
+    signal that this is the truly final merge.'''
+    from chain_growth.assembly import (DOMAIN_SEGID, _attempt_merge, get_residue_indices_for_assembly,
+                                        translate_concept)
+
+    domain_pdb = os.path.join(examples_dir, 'MDfragments/0/pair0.pdb')
+    idr_pdb = os.path.join(examples_dir, 'MDfragments/1/pair0.pdb')
+    prepare_domain_fragment(domain_pdb, str(tmp_path / 'domain'))
+
+    index_aln_l, index_clash_l, index_merge_l = get_residue_indices_for_assembly(
+        overlap0=2, current_overlap=2, capping_groups=True, last_level=False, verbose=False)
+
+    def fresh_pair():
+        u1 = mda.Universe(str(tmp_path / 'domain' / 'pair0.pdb'))
+        u2 = mda.Universe(idr_pdb)
+        select = translate_concept(u1, u2, False, *index_aln_l)
+        return u1, u2, select
+
+    # rmsd_cut_off deliberately huge and clash_distance deliberately tiny, so this
+    # trial is guaranteed to pass regardless of these two fragments' real geometry
+    # -- this test is about the relabeling behavior, not the accept/reject criteria
+    u1, u2, select = fresh_pair()
+    u_default = _attempt_merge(u1, u2, select, index_clash_l, index_merge_l, 999.0, 0.001)
+    assert DOMAIN_SEGID in set(u_default.atoms.segids)
+
+    u1, u2, select = fresh_pair()
+    u_relabeled = _attempt_merge(u1, u2, select, index_clash_l, index_merge_l, 999.0, 0.001,
+                                 relabel_domain_segid=DOMAIN_SEGID)
+    assert DOMAIN_SEGID not in set(u_relabeled.atoms.segids)
