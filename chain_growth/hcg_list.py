@@ -77,6 +77,51 @@ def flatten(pair_list):
         return [pair_list]
 
 
+def derive_strip_cap_from_domain_position(hcg_l, domain_id):
+    """ determine the correct strip_cap_nterm/strip_cap_cterm values for a
+    domain-attachment `hierarchical_chain_growth` run, purely from `hcg_l`'s
+    structure -- no computation needs to have happened yet.
+
+    `hcg_l[-1]` always collapses to exactly one top-level pair `[left_branch,
+    right_branch]` (`make_hcl_l` builds exactly enough levels for a full binary
+    reduction), and hierarchical pairing always preserves the original fragment_ids
+    order, so `left_branch`/`right_branch` correspond to the N-terminal-most and
+    C-terminal-most halves of the assembled chain, respectively. Whichever half
+    contains `domain_id` is where the domain's own real terminal residue ends up,
+    so that end's strip flag must be False (keep it); the other end is the free
+    end's synthetic cap, so its strip flag must be True.
+
+    This removes the need for a caller to manually reason about which physical end
+    `domain_id` lands on for a given fragment_ids/terminus choice -- exactly the
+    reasoning that went wrong in a real run (see `strip_terminal_caps`'s docstring
+    on `hierarchical_chain_growth`).
+
+    Parameters
+    ----------
+    hcg_l : list
+        as returned by `make_hcl_l`
+    domain_id : hashable
+        the domain's fragment id
+
+    Returns
+    -------
+    strip_cap_nterm, strip_cap_cterm : boolean, boolean
+    """
+    left_branch, right_branch = hcg_l[-1][0]
+    domain_in_left = domain_id in flatten(left_branch)
+    domain_in_right = domain_id in flatten(right_branch)
+    if domain_in_left and not domain_in_right:
+        return False, True
+    elif domain_in_right and not domain_in_left:
+        return True, False
+    else:
+        raise ValueError(
+            "could not locate domain_id {!r} on exactly one side of hcg_l's "
+            "top-level pair (found in left branch: {}, in right branch: {}) -- "
+            "this fragment_ids/hcg_l doesn't look like a valid single domain "
+            "attachment.".format(domain_id, domain_in_left, domain_in_right))
+
+
 def make_hcl_l(N, n_to_c_term = True, fragment_ids = None):
     """ create input list with fragments/ pairs of fragments to assemble in HCG to get the full-length chain
 

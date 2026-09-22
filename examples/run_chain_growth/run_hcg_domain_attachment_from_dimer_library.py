@@ -159,9 +159,11 @@ capping_groups = True
 ###########
 ## run HCG
 ###########
-# strip_cap_nterm/strip_cap_cterm: the end where the domain attaches keeps its real
-# terminal residue (False); the free end keeps the usual synthetic-cap stripping (True).
-# For terminus='N' instead, swap these two (strip_cap_nterm=True, strip_cap_cterm=False).
+# strip_cap_nterm/strip_cap_cterm are left unset: with domain_id given,
+# hierarchical_chain_growth derives them automatically from where the domain
+# actually ends up in fragment_ids/hcg_l, keeping its real terminal residue and
+# stripping the free end's synthetic cap either way -- no need to reason about it
+# manually, or to remember swapping anything for terminus='N' vs 'C'.
 hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax=kmax,
-        capping_groups=capping_groups, domain_id=domain_id, domain_overlap=domain_overlap,
-        strip_cap_nterm=False, strip_cap_cterm=True) #, verbose=True)
+        capping_groups=capping_groups, domain_id=domain_id,
+        domain_overlap=domain_overlap) #, verbose=True)

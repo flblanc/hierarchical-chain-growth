@@ -86,22 +86,26 @@ output's segid and chainID are unified across every atom to reflect that -- only
 truly last merge gets relabeled; every intermediate level's output still carries the
 distinct tag, since later levels still need it.
 
-**`strip_terminal_caps` (default `True`):** removes a leftover leading ACE and/or
-trailing NME residue from the truly final, full-length assembled chain -- not specific
-to domain attachment, but especially worth knowing about there. `strip_cap_nterm`/
-`strip_cap_cterm` already strip capping groups at the last level, but they work by
-residue *position* (whichever fragment ends up on each side of the final merge), so
-they're only correct if set to match which physical end of the assembled chain each one
-actually governs -- easy to get backwards, and confirmed in practice: a real
-domain-attachment run used the *other* terminus's example values unswapped, which
-silently deleted the domain's real terminal residue while leaving the free end's ACE cap
-in place. `strip_terminal_caps` checks residue *identity* instead (only ACE at the very
-first position, only NME at the very last), so it's a safety net independent of however
-`strip_cap_nterm`/`strip_cap_cterm` were set: an already-correctly-stripped chain is left
-untouched (its ends are real amino acids, never named ACE/NME), and a leftover cap gets
-caught regardless. It can only ever remove a leftover cap, though, never restore a real
-residue that `strip_cap_nterm`/`strip_cap_cterm` wrongly deleted -- getting those right
-for your `domain_id`/`terminus` combination still matters.
+**`strip_cap_nterm`/`strip_cap_cterm` are derived automatically when `domain_id` is
+set:** they work by residue *position* (whichever fragment ends up on each side of the
+final merge), which used to mean the caller had to correctly reason about which
+physical end of the assembled chain each one actually governs for a given
+`domain_id`/`terminus` combination -- easy to get backwards, and confirmed in practice:
+a real domain-attachment run used the *other* terminus's example values unswapped,
+which silently deleted the domain's real terminal residue while leaving the free end's
+ACE cap in place. `hierarchical_chain_growth` now works this out itself from where
+`domain_id` actually ends up in `hcg_l` -- leave `strip_cap_nterm`/`strip_cap_cterm` as
+`None` (the default) for a domain-attachment run and it's handled automatically; an
+explicit value that disagrees with the derived one raises a clear error immediately,
+before any computation runs, instead of silently producing a wrong model.
+
+**`strip_terminal_caps` (default `True`):** a second, independent safety net, on top
+of the above: on the truly final merge, removes a leftover leading ACE and/or trailing
+NME residue by residue *identity* (only ACE at the very first position, only NME at the
+very last) rather than position. Not specific to domain attachment -- it's the only
+line of defense for an ordinary, domain-free run, where there's nothing to derive
+`strip_cap_nterm`/`strip_cap_cterm` from. An already-correctly-stripped chain is left
+untouched (its ends are real amino acids, never named ACE/NME).
 
 Worked example, attaching the IDR to a folded domain's C-terminus (see
 `examples/run_chain_growth/run_hcg_domain_attachment.py` for the full script):
@@ -125,17 +129,17 @@ prepare_domain_fragment('folded_domain.pdb', 'MDfragments/{}'.format(domain_id))
 fragment_ids = add_domain_to_fragment_list(len(fragment_l), domain_id, terminus='C')
 hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
 
-# strip_cap_nterm=False keeps the domain's real terminal residue instead of treating it
-# as a synthetic cap to discard; strip_cap_cterm=True still strips the free end's cap
+# strip_cap_nterm/strip_cap_cterm are left unset: hierarchical_chain_growth derives
+# them automatically from where domain_id actually ends up in fragment_ids/hcg_l,
+# keeping the domain's real terminal residue and stripping the free end's cap
+# either way -- no need to reason about which one to set for a given terminus
 hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0='.', path='out/', kmax=100,
-        capping_groups=True, domain_id=domain_id, domain_overlap=domain_overlap,
-        strip_cap_nterm=False, strip_cap_cterm=True)
+        capping_groups=True, domain_id=domain_id, domain_overlap=domain_overlap)
 ```
 
-For attachment at the domain's N-terminus instead, pass `terminus='N'` to
-`add_domain_to_fragment_list` and swap the `strip_cap_*` flags (`strip_cap_nterm=True,
-strip_cap_cterm=False`), so the domain's real C-terminal residue is kept while the free
-N-terminal end's cap is still stripped.
+For attachment at the domain's N-terminus instead, just pass `terminus='N'` to
+`add_domain_to_fragment_list` -- `strip_cap_nterm`/`strip_cap_cterm` don't need to
+change (or be set at all), since they're derived from the actual result either way.
 
 ### Attaching a domain when growing from the generic dimer library
 

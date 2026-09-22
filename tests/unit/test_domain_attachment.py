@@ -441,3 +441,56 @@ def test_attempt_merge_strips_terminal_caps_only_when_requested(tmp_path):
     u_stripped = _attempt_merge(u1, u2, select, index_clash_l, index_merge_l, 999.0, 0.001,
                                 strip_terminal_caps=True)
     assert u_stripped.residues[0].resname != 'ACE'
+
+
+def test_derive_strip_cap_from_domain_position():
+    '''The domain occupying the left (N-terminal) half of hcg_l's top-level pair
+    means its real residue is at the very start -- keep it (strip_cap_nterm=False)
+    -- and the free end's cap is at the very end -- strip it (strip_cap_cterm=True).
+    Domain on the right is the mirror image.'''
+    from chain_growth.hcg_list import derive_strip_cap_from_domain_position, make_hcl_l
+
+    hcg_l, _ = make_hcl_l(5, fragment_ids=['domain', 0, 1, 2, 3])
+    assert derive_strip_cap_from_domain_position(hcg_l, 'domain') == (False, True)
+
+    hcg_l, _ = make_hcl_l(5, fragment_ids=[0, 1, 2, 3, 'domain'])
+    assert derive_strip_cap_from_domain_position(hcg_l, 'domain') == (True, False)
+
+
+def test_hierarchical_chain_growth_raises_on_conflicting_strip_cap_args(tmp_path):
+    '''The exact real bug this derivation prevents: an explicit strip_cap_nterm/
+    strip_cap_cterm that disagrees with where domain_id actually ends up must raise
+    immediately -- before any assembly work happens -- rather than silently
+    stripping the domain's real terminal residue.'''
+    from chain_growth.hcg_fct import hierarchical_chain_growth
+    from chain_growth.hcg_list import make_hcl_l
+
+    hcg_l, promo_l = make_hcl_l(5, fragment_ids=['domain', 0, 1, 2, 3])
+    # domain is first, so strip_cap_nterm should be False -- passing True conflicts
+    with pytest.raises(ValueError, match='conflicts with where domain_id'):
+        hierarchical_chain_growth(
+            hcg_l, promo_l, overlaps_d={0: 2}, path0='unused', path=str(tmp_path / 'out'),
+            kmax=1, domain_id='domain', domain_overlap=2, strip_cap_nterm=True)
+    assert not (tmp_path / 'out').exists()
+
+
+def test_hierarchical_chain_growth_leaves_matching_strip_cap_args_untouched(tmp_path):
+    '''An explicit value that already matches the derived one must be accepted
+    without complaint -- this validation is a safety check, not a ban on passing
+    strip_cap_nterm/strip_cap_cterm explicitly.'''
+    from chain_growth.hcg_fct import hierarchical_chain_growth
+    from chain_growth.hcg_list import derive_strip_cap_from_domain_position, make_hcl_l
+
+    hcg_l, promo_l = make_hcl_l(5, fragment_ids=['domain', 0, 1, 2, 3])
+    derived_nterm, derived_cterm = derive_strip_cap_from_domain_position(hcg_l, 'domain')
+
+    domain_pdb = os.path.join(examples_dir, 'MDfragments/0/pair0.pdb')
+    prepare_domain_fragment(domain_pdb, str(tmp_path / 'MDfragments' / 'domain'))
+    # the run will still fail downstream (no real MDfragments/0..3 set up here) --
+    # this test only cares that it gets *past* the strip_cap validation itself
+    with pytest.raises(Exception) as exc_info:
+        hierarchical_chain_growth(
+            hcg_l, promo_l, overlaps_d={0: 2}, path0=str(tmp_path), path=str(tmp_path / 'out'),
+            kmax=1, domain_id='domain', domain_overlap=2,
+            strip_cap_nterm=derived_nterm, strip_cap_cterm=derived_cterm)
+    assert 'conflicts with where domain_id' not in str(exc_info.value)

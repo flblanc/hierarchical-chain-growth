@@ -13,6 +13,7 @@ import pathlib, shutil, os
 from multiprocessing import Pool
 from functools import partial
 from tqdm import tqdm
+from chain_growth.hcg_list import derive_strip_cap_from_domain_position
 # the per-pair geometry/selection helpers used to live in this module; they moved to
 # chain_growth.assembly for organization, and are re-exported here unchanged so
 # existing `from chain_growth.hcg_fct import ...` call sites keep working
@@ -192,14 +193,20 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
         the run's general default overlap).
     strip_cap_nterm : boolean, optional
         whether to strip the capping-group residue at the N-terminal-most exposed end of the
-        full-length chain at the last assembly level. Defaults to `capping_groups` when None. Set
-        to False when the N-terminus is a folded domain's real terminus (attached via
-        `domain_id`) rather than a synthetic cap.
+        full-length chain at the last assembly level. When `domain_id` is set, leave this as
+        None: it's derived automatically from where `domain_id` actually ends up in `hcg_l`
+        (see `chain_growth.hcg_list.derive_strip_cap_from_domain_position`), so the domain's
+        real terminal residue is always kept rather than risking it being stripped as if it
+        were a synthetic cap -- a real run once got this backwards by passing an explicit,
+        wrong value, which is exactly what an explicit value that disagrees with the derived
+        one now raises a clear error for instead of silently doing the wrong thing. When
+        `domain_id` is None, defaults to `capping_groups` when left as None, unchanged from
+        before.
     strip_cap_cterm : boolean, optional
         whether to strip the capping-group residue at the C-terminal-most exposed end of the
-        full-length chain at the last assembly level. Defaults to `capping_groups` when None. Set
-        to False when the C-terminus is a folded domain's real terminus (attached via
-        `domain_id`) rather than a synthetic cap.
+        full-length chain at the last assembly level. See `strip_cap_nterm` -- the same
+        automatic derivation (and validation against an explicit value) applies here too when
+        `domain_id` is set.
     num_threads : integer, optional
         number of worker processes to use for the per-level Pool that assembles a level's
         independent fragment pairs in parallel. The default is None, which auto-detects
@@ -230,6 +237,31 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
     -------
     None.
     """
+
+    if domain_id is not None:
+        derived_nterm, derived_cterm = derive_strip_cap_from_domain_position(hcg_l, domain_id)
+        if strip_cap_nterm is None:
+            strip_cap_nterm = derived_nterm
+        elif strip_cap_nterm != derived_nterm:
+            raise ValueError(
+                "strip_cap_nterm={} conflicts with where domain_id={!r} actually ends "
+                "up in the assembled chain (derived from hcg_l/fragment_ids): it should "
+                "be {}, so that the domain's real terminal residue is kept rather than "
+                "stripped as if it were a synthetic cap (this is exactly the mistake a "
+                "real run made -- see strip_terminal_caps's docstring). Pass "
+                "strip_cap_nterm={} explicitly, or leave it as None to have this derived "
+                "automatically.".format(strip_cap_nterm, domain_id, derived_nterm, derived_nterm))
+        if strip_cap_cterm is None:
+            strip_cap_cterm = derived_cterm
+        elif strip_cap_cterm != derived_cterm:
+            raise ValueError(
+                "strip_cap_cterm={} conflicts with where domain_id={!r} actually ends "
+                "up in the assembled chain (derived from hcg_l/fragment_ids): it should "
+                "be {}, so that the domain's real terminal residue is kept rather than "
+                "stripped as if it were a synthetic cap (this is exactly the mistake a "
+                "real run made -- see strip_terminal_caps's docstring). Pass "
+                "strip_cap_cterm={} explicitly, or leave it as None to have this derived "
+                "automatically.".format(strip_cap_cterm, domain_id, derived_cterm, derived_cterm))
 
     last_level = False
     k_max = kmax

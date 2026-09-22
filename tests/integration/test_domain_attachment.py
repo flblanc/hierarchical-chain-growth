@@ -19,6 +19,7 @@ overlap residues instead, and only the first frame kept (single, rigid conformat
 import os
 
 import MDAnalysis as mda
+import pytest
 
 from chain_growth.assembly import DOMAIN_SEGID
 from chain_growth.fragment_list import (add_domain_to_fragment_list, generate_fragment_list,
@@ -250,52 +251,30 @@ def test_domain_attachment_n_terminus(tmp_path):
     assert sequence_hcg == sequence_ref
 
 
-def test_strip_terminal_caps_catches_leftover_cap_from_misconfigured_strip_cap_args(tmp_path):
+def test_misconfigured_strip_cap_args_raise_immediately(tmp_path):
     '''Reproduces a real bug found in practice: a domain-attachment run with
     strip_cap_nterm/strip_cap_cterm set for the wrong physical end (backwards
-    relative to where the domain actually sits in fragment_ids) silently left a
-    real ACE/NME cap in the "final" output. strip_terminal_caps=True (the default)
-    must catch and remove that leftover cap even though the positional mechanism
-    got it backwards -- it cannot undo the *other* half of that kind of mistake
-    (a real residue wrongly stripped instead), since that data is simply gone by
-    the time this runs; it can only ever remove, never restore.'''
+    relative to where the domain actually sits in fragment_ids) silently deleted
+    the domain's real terminal residue while leaving a real ACE/NME cap in the
+    "final" output. hierarchical_chain_growth now derives the correct values from
+    hcg_l automatically and raises immediately if an explicit value disagrees,
+    catching this exact mistake before any computation runs (rather than relying
+    on strip_terminal_caps to clean up a leftover cap afterward, which can't undo
+    a real residue wrongly deleted the other way).'''
     domain_id = 'domain'
     domain_overlap = 2
 
     mdfragments_dir, sequence_f, overlaps_d, hcg_l, promo_l = _build_c_terminus_fragment_tree(
         tmp_path, domain_id)
-
-    # unlike _prepare_domain_fixture, both caps are dropped here: this domain's own
-    # kept terminal residue must be a genuine amino acid (as any real domain's
-    # would be), not coincidentally named ACE/NME itself, so this test can tell
-    # "leftover free-end cap" apart from "domain's own real residue"
-    fragment0_pdb = os.path.join(examples_dir, 'MDfragments/0/pair0.pdb')
-    u_fragment0 = mda.Universe(fragment0_pdb)
-    domain_src_pdb = tmp_path / 'domain_src.pdb'
-    u_fragment0.select_atoms('not resname ACE and not resname NME').write(str(domain_src_pdb))
-    prepare_domain_fragment(str(domain_src_pdb), str(mdfragments_dir / domain_id))
+    _prepare_domain_fixture(mdfragments_dir / domain_id)
 
     # domain is FIRST here, so the correct values are strip_cap_nterm=False (keep
     # the domain's own real residue) and strip_cap_cterm=True (strip the free
-    # C-terminal end's NME) -- deliberately backwards below, exactly reproducing
-    # the real mistake (which used the *other* orientation's values unswapped)
-    kwargs = dict(capping_groups=True, domain_id=domain_id, domain_overlap=domain_overlap,
-                  strip_cap_nterm=True, strip_cap_cterm=False)
-
-    out_dir_bug = tmp_path / 'out_bug'
-    hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, str(tmp_path), str(out_dir_bug),
-                               kmax=5, strip_terminal_caps=False, **kwargs)
-    final_level = len(hcg_l)
-    final_pdb_bug = out_dir_bug / str(final_level) / domain_id / 'pair0.pdb'
-    resnames_bug = list(mda.Universe(str(final_pdb_bug)).residues.resnames)
-    # reproduces the real bug: the free end's NME is left in place
-    assert resnames_bug[-1] == 'NME'
-
-    out_dir_fixed = tmp_path / 'out_fixed'
-    hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, str(tmp_path), str(out_dir_fixed),
-                               kmax=5, strip_terminal_caps=True, **kwargs)
-    final_pdb_fixed = out_dir_fixed / str(final_level) / domain_id / 'pair0.pdb'
-    resnames_fixed = list(mda.Universe(str(final_pdb_fixed)).residues.resnames)
-    # strip_terminal_caps=True catches it even though strip_cap_cterm didn't
-    assert resnames_fixed[-1] != 'NME'
-    assert 'NME' not in resnames_fixed and 'ACE' not in resnames_fixed
+    # end's cap) -- deliberately backwards below, exactly reproducing the real
+    # mistake (which used the *other* orientation's values unswapped)
+    with pytest.raises(ValueError, match='conflicts with where domain_id'):
+        hierarchical_chain_growth(
+            hcg_l, promo_l, overlaps_d, str(tmp_path), str(tmp_path / 'out'), kmax=5,
+            capping_groups=True, domain_id=domain_id, domain_overlap=domain_overlap,
+            strip_cap_nterm=True, strip_cap_cterm=False)
+    assert not (tmp_path / 'out').exists()
