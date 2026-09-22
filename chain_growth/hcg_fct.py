@@ -71,7 +71,6 @@ def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
     """
 
     k = 0
-    assembly_atempt = 0
 
     if ri_l is None:
         # array to store random frame indices of successfully assembled fragments / pairs
@@ -112,7 +111,6 @@ def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
         
         # rmsd suportimposition of the subsequent fragmenmt, calculate clashes,
         # and assemble the subsequent fragments if both criteria pass
-        assembly_atempt += 1
         u = _attempt_merge(u1, u2, select, index_clash_l, index_merge_l,
                            rmsd_cut_off, clash_distance,
                            relabel_domain_segid=relabel_domain_segid,

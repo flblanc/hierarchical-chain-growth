@@ -42,18 +42,18 @@ def _prepare_domain_fixture(out_dir):
     domain_atoms.write(os.path.join(out_dir, 'pair.xtc'), frames='all')
 
 
-def test_domain_attachment_c_terminus(tmp_path):
-    '''Domain placed first, IDR growing off its C-terminal end (its own N-terminal
-    residue, ACE, is the real terminus that's kept).'''
-    domain_id = 'domain'
-    domain_overlap = 2
-    n_real_fragments = 14  # fragments 1..14 of the truncated tauK18 example
+def _build_c_terminus_fragment_tree(tmp_path, domain_id, n_real_fragments=14):
+    '''Shared setup for every "domain first, IDR growing off its C-terminal end"
+    test below: symlink fragments 2..n_real_fragments from examples/ unmodified,
+    and rebuild fragment 1 without its own leading ACE cap (per the approved
+    design, the domain-facing terminal fragment has no synthetic cap on the
+    domain-facing end). Callers still need to build MDfragments/<domain_id>
+    themselves -- how the domain is prepared is what each test is actually about.
 
-    # isolated MDfragments tree: fragments 2..14 (symlinked from examples/) + the domain.
-    # Fragment 1 is rebuilt without its own leading ACE cap: per the approved design, the
-    # domain-facing terminal fragment has no synthetic cap on the domain-facing end (its
-    # overlap residues directly continue the domain's real sequence), so its stand-in
-    # here must match that, not the unmodified raw fragment (which still has ACE there).
+    Returns
+    -------
+    mdfragments_dir, sequence_f, overlaps_d, hcg_l, promo_l
+    '''
     mdfragments_dir = tmp_path / 'MDfragments'
     for i in range(2, n_real_fragments + 1):
         src = os.path.join(examples_dir, 'MDfragments', str(i))
@@ -69,8 +69,6 @@ def test_domain_attachment_c_terminus(tmp_path):
     fragment1_atoms.write(str(fragment1_dst / 'pair0.pdb'))
     fragment1_atoms.write(str(fragment1_dst / 'pair.xtc'), frames='all')
 
-    _prepare_domain_fixture(mdfragments_dir / domain_id)
-
     # overlaps_d for the real (non-domain) fragments; key 0 is only ever read as the
     # run's general default overlap, unrelated to fragment id 0 not being used here
     sequence_f = os.path.join(examples_dir, 'truncated_tauK18.fasta')
@@ -78,6 +76,19 @@ def test_domain_attachment_c_terminus(tmp_path):
 
     fragment_ids = [domain_id] + list(range(1, n_real_fragments + 1))
     hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
+
+    return mdfragments_dir, sequence_f, overlaps_d, hcg_l, promo_l
+
+
+def test_domain_attachment_c_terminus(tmp_path):
+    '''Domain placed first, IDR growing off its C-terminal end (its own N-terminal
+    residue, ACE, is the real terminus that's kept).'''
+    domain_id = 'domain'
+    domain_overlap = 2
+
+    mdfragments_dir, sequence_f, overlaps_d, hcg_l, promo_l = _build_c_terminus_fragment_tree(
+        tmp_path, domain_id)
+    _prepare_domain_fixture(mdfragments_dir / domain_id)
 
     out_dir = tmp_path / 'out'
     # strip_terminal_caps=False: this fixture's "domain" is a stand-in built from a
@@ -124,22 +135,10 @@ def test_domain_attachment_unifies_segid_only_at_final_level(tmp_path):
     finished.'''
     domain_id = 'domain'
     domain_overlap = 2
-    n_real_fragments = 14
 
-    mdfragments_dir = tmp_path / 'MDfragments'
-    for i in range(2, n_real_fragments + 1):
-        src = os.path.join(examples_dir, 'MDfragments', str(i))
-        dst = mdfragments_dir / str(i)
-        os.makedirs(dst)
-        for fname in ('pair0.pdb', 'pair.xtc'):
-            os.symlink(os.path.join(src, fname), dst / fname)
-
-    fragment1_dst = mdfragments_dir / '1'
-    os.makedirs(fragment1_dst)
-    u_fragment1 = mda.Universe(os.path.join(examples_dir, 'MDfragments/1/pair0.pdb'))
-    fragment1_atoms = u_fragment1.select_atoms('not resname ACE')
-    fragment1_atoms.write(str(fragment1_dst / 'pair0.pdb'))
-    fragment1_atoms.write(str(fragment1_dst / 'pair.xtc'), frames='all')
+    mdfragments_dir, sequence_f, overlaps_d, hcg_l, promo_l = _build_c_terminus_fragment_tree(
+        tmp_path, domain_id)
+    assert len(hcg_l) > 1  # this test needs a real intermediate level to check
 
     # unlike _prepare_domain_fixture (used by the other tests in this file), this
     # goes through the real prepare_domain_fragment, so the domain's atoms actually
@@ -150,13 +149,6 @@ def test_domain_attachment_unifies_segid_only_at_final_level(tmp_path):
     domain_src_pdb = tmp_path / 'domain_src.pdb'
     u_fragment0.select_atoms('not resname NME').write(str(domain_src_pdb))
     prepare_domain_fragment(str(domain_src_pdb), str(mdfragments_dir / domain_id))
-
-    sequence_f = os.path.join(examples_dir, 'truncated_tauK18.fasta')
-    _, overlaps_d = generate_fragment_list(sequence_f, fragment_length=5, overlap=2)
-
-    fragment_ids = [domain_id] + list(range(1, n_real_fragments + 1))
-    hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
-    assert len(hcg_l) > 1  # this test needs a real intermediate level to check
 
     out_dir = tmp_path / 'out'
     hierarchical_chain_growth(
@@ -269,22 +261,9 @@ def test_strip_terminal_caps_catches_leftover_cap_from_misconfigured_strip_cap_a
     the time this runs; it can only ever remove, never restore.'''
     domain_id = 'domain'
     domain_overlap = 2
-    n_real_fragments = 14
 
-    mdfragments_dir = tmp_path / 'MDfragments'
-    for i in range(2, n_real_fragments + 1):
-        src = os.path.join(examples_dir, 'MDfragments', str(i))
-        dst = mdfragments_dir / str(i)
-        os.makedirs(dst)
-        for fname in ('pair0.pdb', 'pair.xtc'):
-            os.symlink(os.path.join(src, fname), dst / fname)
-
-    fragment1_dst = mdfragments_dir / '1'
-    os.makedirs(fragment1_dst)
-    u_fragment1 = mda.Universe(os.path.join(examples_dir, 'MDfragments/1/pair0.pdb'))
-    fragment1_atoms = u_fragment1.select_atoms('not resname ACE')
-    fragment1_atoms.write(str(fragment1_dst / 'pair0.pdb'))
-    fragment1_atoms.write(str(fragment1_dst / 'pair.xtc'), frames='all')
+    mdfragments_dir, sequence_f, overlaps_d, hcg_l, promo_l = _build_c_terminus_fragment_tree(
+        tmp_path, domain_id)
 
     # unlike _prepare_domain_fixture, both caps are dropped here: this domain's own
     # kept terminal residue must be a genuine amino acid (as any real domain's
@@ -295,12 +274,6 @@ def test_strip_terminal_caps_catches_leftover_cap_from_misconfigured_strip_cap_a
     domain_src_pdb = tmp_path / 'domain_src.pdb'
     u_fragment0.select_atoms('not resname ACE and not resname NME').write(str(domain_src_pdb))
     prepare_domain_fragment(str(domain_src_pdb), str(mdfragments_dir / domain_id))
-
-    sequence_f = os.path.join(examples_dir, 'truncated_tauK18.fasta')
-    _, overlaps_d = generate_fragment_list(sequence_f, fragment_length=5, overlap=2)
-
-    fragment_ids = [domain_id] + list(range(1, n_real_fragments + 1))
-    hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
 
     # domain is FIRST here, so the correct values are strip_cap_nterm=False (keep
     # the domain's own real residue) and strip_cap_cterm=True (strip the free
