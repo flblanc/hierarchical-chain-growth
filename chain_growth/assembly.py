@@ -379,8 +379,51 @@ def _unify_domain_segid(u, domain_segid):
         u.atoms.chainIDs = non_domain.chainIDs[0]
 
 
+def _strip_terminal_caps(u):
+    """ remove a leading ACE and/or trailing NME residue from a fully-assembled
+    chain, if present.
+
+    This is a robust, deliberately independent safety net alongside
+    `get_residue_indices_for_assembly`'s `strip_cap_nterm`/`strip_cap_cterm`: those
+    work by residue *position* (first/last residue of whichever fragment ends up on
+    each side of the final merge), which is only correct if the caller correctly
+    reasons about which physical end of the assembled chain that position
+    corresponds to -- for a domain-attachment run in particular, that depends on
+    `terminus` and gets it backwards easily (confirmed in practice: a real run with
+    `terminus='N'` used the `terminus='C'` example's strip_cap_nterm/strip_cap_cterm
+    values unswapped, which silently deleted the domain's real terminal residue
+    while leaving the free end's ACE cap in place). This function instead checks
+    residue *identity*: an already-correctly-stripped chain is left untouched (its
+    ends are real amino acids, never named ACE or NME), so it's always safe to call
+    regardless of how strip_cap_nterm/strip_cap_cterm were set, and it catches a
+    leftover cap that should have been, but wasn't, stripped.
+
+    Parameters
+    ----------
+    u : universe
+        a freshly merge_universe'd universe, at the truly final merge
+
+    Returns
+    -------
+    u : universe
+        u itself, unchanged, if neither end is a cap; otherwise a new universe with
+        the cap residue(s) removed and resids renumbered from 1
+    """
+    residues = u.residues
+    first_is_ace = residues[0].resname == 'ACE'
+    last_is_nme = residues[-1].resname == 'NME'
+    if not first_is_ace and not last_is_nme:
+        return u
+    start_resid = residues[1].resid if first_is_ace else residues[0].resid
+    end_resid = residues[-2].resid if last_is_nme else residues[-1].resid
+    kept = u.select_atoms('resid {}:{}'.format(start_resid, end_resid))
+    u_stripped = mda.core.universe.Merge(kept)
+    u_stripped.atoms.residues.resids = np.arange(1, len(u_stripped.residues) + 1)
+    return u_stripped
+
+
 def _attempt_merge(u1, u2, select, index_clash_l, index_merge_l, rmsd_cut_off, clash_distance,
-                   relabel_domain_segid=None):
+                   relabel_domain_segid=None, strip_terminal_caps=False):
     """ attempt one rejection-sampling trial: align u1/u2's currently-loaded frames,
     and merge them if both the RMSD and clash-count criteria pass.
 
@@ -396,6 +439,11 @@ def _attempt_merge(u1, u2, select, index_clash_l, index_merge_l, rmsd_cut_off, c
         returned -- callers pass this only for the truly final merge of a
         domain-attachment run (see `_unify_domain_segid`'s own docstring for why).
         The default is None (no relabeling, unchanged pre-existing behavior).
+    strip_terminal_caps : boolean, optional
+        when True, a successful merge gets any leftover leading ACE/trailing NME
+        residue removed via `_strip_terminal_caps` before being returned -- callers
+        pass this only for the truly final merge (see that function's own
+        docstring). The default is False.
 
     Returns
     -------
@@ -412,5 +460,7 @@ def _attempt_merge(u1, u2, select, index_clash_l, index_merge_l, rmsd_cut_off, c
             u = merge_universe(u1, u2, *index_merge_l)
             if relabel_domain_segid is not None:
                 _unify_domain_segid(u, relabel_domain_segid)
+            if strip_terminal_caps:
+                u = _strip_terminal_caps(u)
             return u
     return None

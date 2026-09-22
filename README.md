@@ -86,6 +86,23 @@ output's segid and chainID are unified across every atom to reflect that -- only
 truly last merge gets relabeled; every intermediate level's output still carries the
 distinct tag, since later levels still need it.
 
+**`strip_terminal_caps` (default `True`):** removes a leftover leading ACE and/or
+trailing NME residue from the truly final, full-length assembled chain -- not specific
+to domain attachment, but especially worth knowing about there. `strip_cap_nterm`/
+`strip_cap_cterm` already strip capping groups at the last level, but they work by
+residue *position* (whichever fragment ends up on each side of the final merge), so
+they're only correct if set to match which physical end of the assembled chain each one
+actually governs -- easy to get backwards, and confirmed in practice: a real
+domain-attachment run used the *other* terminus's example values unswapped, which
+silently deleted the domain's real terminal residue while leaving the free end's ACE cap
+in place. `strip_terminal_caps` checks residue *identity* instead (only ACE at the very
+first position, only NME at the very last), so it's a safety net independent of however
+`strip_cap_nterm`/`strip_cap_cterm` were set: an already-correctly-stripped chain is left
+untouched (its ends are real amino acids, never named ACE/NME), and a leftover cap gets
+caught regardless. It can only ever remove a leftover cap, though, never restore a real
+residue that `strip_cap_nterm`/`strip_cap_cterm` wrongly deleted -- getting those right
+for your `domain_id`/`terminus` combination still matters.
+
 Worked example, attaching the IDR to a folded domain's C-terminus (see
 `examples/run_chain_growth/run_hcg_domain_attachment.py` for the full script):
 

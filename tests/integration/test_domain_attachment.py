@@ -80,10 +80,16 @@ def test_domain_attachment_c_terminus(tmp_path):
     hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
 
     out_dir = tmp_path / 'out'
+    # strip_terminal_caps=False: this fixture's "domain" is a stand-in built from a
+    # real, still-capped MD fragment (see _prepare_domain_fixture), so its own kept
+    # terminal residue is literally resname ACE -- a fixture-only coincidence real
+    # domains won't have (a true domain terminus is never named ACE/NME). Disabled
+    # here so that coincidence doesn't collide with the name-based safety net this
+    # test isn't about; strip_terminal_caps gets its own dedicated tests.
     hierarchical_chain_growth(
         hcg_l, promo_l, overlaps_d, str(tmp_path), str(out_dir), kmax=5,
         capping_groups=True, domain_id=domain_id, domain_overlap=domain_overlap,
-        strip_cap_nterm=False, strip_cap_cterm=True)
+        strip_cap_nterm=False, strip_cap_cterm=True, strip_terminal_caps=False)
 
     # level 1: domain (kept: ACE,LEU,GLN,THR) merged with fragment 1 (kept: ALA,PRO,VAL,PRO,MET,NME)
     level1_pdb = out_dir / '1' / domain_id / 'pair0.pdb'
@@ -216,10 +222,16 @@ def test_domain_attachment_n_terminus(tmp_path):
     hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
 
     out_dir = tmp_path / 'out'
+    # strip_terminal_caps=False: this fixture's "domain" is sliced from a real,
+    # still-capped MD fragment (see above), so its own kept terminal residue is
+    # literally resname NME -- a fixture-only coincidence real domains won't have (a
+    # true domain terminus is never named ACE/NME). Disabled here so that
+    # coincidence doesn't collide with the name-based safety net this test isn't
+    # about; strip_terminal_caps gets its own dedicated tests.
     hierarchical_chain_growth(
         hcg_l, promo_l, overlaps_d, str(tmp_path), str(out_dir), kmax=5,
         capping_groups=True, domain_id=domain_id, domain_overlap=domain_overlap,
-        strip_cap_nterm=True, strip_cap_cterm=False)
+        strip_cap_nterm=True, strip_cap_cterm=False, strip_terminal_caps=False)
 
     # level 1: fragment 14 (kept: ACE,SER,ASN,VAL,GLN) merged with domain (kept: SER,NME)
     # -- together exactly reconstituting fragment 14's original, unmodified sequence
@@ -244,3 +256,73 @@ def test_domain_attachment_n_terminus(tmp_path):
     sequence_hcg = get_sequence(str(final_pdb), NA=False).get_sequence_list()[:-1]
     sequence_ref = get_sequence(sequence_f, NA=False).get_sequence_list()
     assert sequence_hcg == sequence_ref
+
+
+def test_strip_terminal_caps_catches_leftover_cap_from_misconfigured_strip_cap_args(tmp_path):
+    '''Reproduces a real bug found in practice: a domain-attachment run with
+    strip_cap_nterm/strip_cap_cterm set for the wrong physical end (backwards
+    relative to where the domain actually sits in fragment_ids) silently left a
+    real ACE/NME cap in the "final" output. strip_terminal_caps=True (the default)
+    must catch and remove that leftover cap even though the positional mechanism
+    got it backwards -- it cannot undo the *other* half of that kind of mistake
+    (a real residue wrongly stripped instead), since that data is simply gone by
+    the time this runs; it can only ever remove, never restore.'''
+    domain_id = 'domain'
+    domain_overlap = 2
+    n_real_fragments = 14
+
+    mdfragments_dir = tmp_path / 'MDfragments'
+    for i in range(2, n_real_fragments + 1):
+        src = os.path.join(examples_dir, 'MDfragments', str(i))
+        dst = mdfragments_dir / str(i)
+        os.makedirs(dst)
+        for fname in ('pair0.pdb', 'pair.xtc'):
+            os.symlink(os.path.join(src, fname), dst / fname)
+
+    fragment1_dst = mdfragments_dir / '1'
+    os.makedirs(fragment1_dst)
+    u_fragment1 = mda.Universe(os.path.join(examples_dir, 'MDfragments/1/pair0.pdb'))
+    fragment1_atoms = u_fragment1.select_atoms('not resname ACE')
+    fragment1_atoms.write(str(fragment1_dst / 'pair0.pdb'))
+    fragment1_atoms.write(str(fragment1_dst / 'pair.xtc'), frames='all')
+
+    # unlike _prepare_domain_fixture, both caps are dropped here: this domain's own
+    # kept terminal residue must be a genuine amino acid (as any real domain's
+    # would be), not coincidentally named ACE/NME itself, so this test can tell
+    # "leftover free-end cap" apart from "domain's own real residue"
+    fragment0_pdb = os.path.join(examples_dir, 'MDfragments/0/pair0.pdb')
+    u_fragment0 = mda.Universe(fragment0_pdb)
+    domain_src_pdb = tmp_path / 'domain_src.pdb'
+    u_fragment0.select_atoms('not resname ACE and not resname NME').write(str(domain_src_pdb))
+    prepare_domain_fragment(str(domain_src_pdb), str(mdfragments_dir / domain_id))
+
+    sequence_f = os.path.join(examples_dir, 'truncated_tauK18.fasta')
+    _, overlaps_d = generate_fragment_list(sequence_f, fragment_length=5, overlap=2)
+
+    fragment_ids = [domain_id] + list(range(1, n_real_fragments + 1))
+    hcg_l, promo_l = make_hcl_l(len(fragment_ids), fragment_ids=fragment_ids)
+
+    # domain is FIRST here, so the correct values are strip_cap_nterm=False (keep
+    # the domain's own real residue) and strip_cap_cterm=True (strip the free
+    # C-terminal end's NME) -- deliberately backwards below, exactly reproducing
+    # the real mistake (which used the *other* orientation's values unswapped)
+    kwargs = dict(capping_groups=True, domain_id=domain_id, domain_overlap=domain_overlap,
+                  strip_cap_nterm=True, strip_cap_cterm=False)
+
+    out_dir_bug = tmp_path / 'out_bug'
+    hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, str(tmp_path), str(out_dir_bug),
+                               kmax=5, strip_terminal_caps=False, **kwargs)
+    final_level = len(hcg_l)
+    final_pdb_bug = out_dir_bug / str(final_level) / domain_id / 'pair0.pdb'
+    resnames_bug = list(mda.Universe(str(final_pdb_bug)).residues.resnames)
+    # reproduces the real bug: the free end's NME is left in place
+    assert resnames_bug[-1] == 'NME'
+
+    out_dir_fixed = tmp_path / 'out_fixed'
+    hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, str(tmp_path), str(out_dir_fixed),
+                               kmax=5, strip_terminal_caps=True, **kwargs)
+    final_pdb_fixed = out_dir_fixed / str(final_level) / domain_id / 'pair0.pdb'
+    resnames_fixed = list(mda.Universe(str(final_pdb_fixed)).residues.resnames)
+    # strip_terminal_caps=True catches it even though strip_cap_cterm didn't
+    assert resnames_fixed[-1] != 'NME'
+    assert 'NME' not in resnames_fixed and 'ACE' not in resnames_fixed

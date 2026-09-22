@@ -375,14 +375,19 @@ def build_domain_junction_fragment(dimer_library, domain_pdb, idr_boundary_resid
     # they'd otherwise both default to capping_groups (True), stripping the cap off
     # BOTH ends -- silently discarding the free end's cap along with it, which is
     # needed as the alignment anchor for this fragment's later, ordinary join with the
-    # rest of the dimer-library-grown IDR (see module docstring).
+    # rest of the dimer-library-grown IDR (see module docstring). strip_terminal_caps
+    # must be disabled for the same reason: from this internal call's own point of
+    # view last_level=True too, but this junction fragment isn't the whole pipeline's
+    # real final output -- its name-based safety net would otherwise strip that same
+    # needed cap right back off regardless of strip_cap_nterm/strip_cap_cterm.
     hcg_l, promo_l = make_hcl_l(2, fragment_ids=input_ids)
     build_path = os.path.join(path0, '_junction_build_{}'.format(junction_id))
     hierarchical_chain_growth(
         hcg_l, promo_l, overlaps_d={0: 1, input_ids[1]: 1}, path0=path0, path=build_path,
         kmax=kmax, capping_groups=capping_groups, rmsd_cut_off=rmsd_cut_off,
         clash_distance=clash_distance, verbose=verbose, num_threads=1,
-        strip_cap_nterm=junction_strip_nterm, strip_cap_cterm=junction_strip_cterm)
+        strip_cap_nterm=junction_strip_nterm, strip_cap_cterm=junction_strip_cterm,
+        strip_terminal_caps=False)
 
     junction_dst = os.path.join(mdfragments_dir, str(junction_id))
     os.makedirs(junction_dst, exist_ok=True)

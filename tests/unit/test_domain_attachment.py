@@ -374,3 +374,70 @@ def test_attempt_merge_relabels_domain_segid_only_when_requested(tmp_path):
     u_relabeled = _attempt_merge(u1, u2, select, index_clash_l, index_merge_l, 999.0, 0.001,
                                  relabel_domain_segid=DOMAIN_SEGID)
     assert DOMAIN_SEGID not in set(u_relabeled.atoms.segids)
+
+
+def test_strip_terminal_caps_removes_leading_ace_and_trailing_nme():
+    '''The real-world motivation: a leftover cap can end up in a "final" model when
+    strip_cap_nterm/strip_cap_cterm (which work by residue position) are configured
+    for the wrong physical end -- confirmed in practice for a real domain-attachment
+    run, which silently deleted the domain's own real terminal residue while leaving
+    the free end's ACE cap in place. _strip_terminal_caps checks residue identity
+    instead, so it's unaffected by that kind of mistake.'''
+    from chain_growth.assembly import _strip_terminal_caps
+
+    u = mda.Universe(os.path.join(examples_dir, 'MDfragments/1/pair0.pdb'))
+    assert list(u.residues.resnames) == ['ACE', 'ALA', 'PRO', 'VAL', 'PRO', 'MET', 'NME']
+
+    u_stripped = _strip_terminal_caps(u)
+
+    assert list(u_stripped.residues.resnames) == ['ALA', 'PRO', 'VAL', 'PRO', 'MET']
+    assert list(u_stripped.residues.resids) == [1, 2, 3, 4, 5]
+
+
+def test_strip_terminal_caps_noop_without_a_cap():
+    '''An already-correctly-stripped chain (neither end named ACE/NME, e.g. because
+    strip_cap_nterm/strip_cap_cterm already did their job, or a domain's own real
+    terminal residue) must be returned untouched.'''
+    from chain_growth.assembly import _strip_terminal_caps
+
+    u = mda.Universe(os.path.join(examples_dir, 'MDfragments/1/pair0.pdb'))
+    internal_only = mda.core.universe.Merge(u.select_atoms('resid 2:6'))
+    resnames_before = list(internal_only.residues.resnames)
+    assert 'ACE' not in resnames_before and 'NME' not in resnames_before
+
+    result = _strip_terminal_caps(internal_only)
+
+    assert result is internal_only
+    assert list(result.residues.resnames) == resnames_before
+
+
+def test_attempt_merge_strips_terminal_caps_only_when_requested(tmp_path):
+    '''_attempt_merge must leave a leftover cap in place by default, and only strip
+    it when explicitly asked via strip_terminal_caps -- the caller's signal that
+    this is the truly final merge.'''
+    from chain_growth.assembly import (_attempt_merge, get_residue_indices_for_assembly,
+                                        translate_concept)
+
+    domain_pdb = os.path.join(examples_dir, 'MDfragments/0/pair0.pdb')
+    idr_pdb = os.path.join(examples_dir, 'MDfragments/1/pair0.pdb')
+    prepare_domain_fragment(domain_pdb, str(tmp_path / 'domain'))
+
+    index_aln_l, index_clash_l, index_merge_l = get_residue_indices_for_assembly(
+        overlap0=2, current_overlap=2, capping_groups=True, last_level=False, verbose=False)
+
+    def fresh_pair():
+        u1 = mda.Universe(str(tmp_path / 'domain' / 'pair0.pdb'))
+        u2 = mda.Universe(idr_pdb)
+        select = translate_concept(u1, u2, False, *index_aln_l)
+        return u1, u2, select
+
+    # rmsd_cut_off deliberately huge and clash_distance deliberately tiny, so this
+    # trial is guaranteed to pass regardless of these two fragments' real geometry
+    u1, u2, select = fresh_pair()
+    u_default = _attempt_merge(u1, u2, select, index_clash_l, index_merge_l, 999.0, 0.001)
+    assert u_default.residues[0].resname == 'ACE'
+
+    u1, u2, select = fresh_pair()
+    u_stripped = _attempt_merge(u1, u2, select, index_clash_l, index_merge_l, 999.0, 0.001,
+                                strip_terminal_caps=True)
+    assert u_stripped.residues[0].resname != 'ACE'

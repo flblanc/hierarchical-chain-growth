@@ -24,7 +24,7 @@ from chain_growth.assembly import (
 
 def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
          rmsd_cut_off, clash_distance, kmax, ri_l=None, draw_indices=True,
-         relabel_domain_segid=None):
+         relabel_domain_segid=None, strip_terminal_caps=False):
     """ assemble the fragments to pairs
     
     Parameters
@@ -57,6 +57,9 @@ def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
     relabel_domain_segid : string, optional
         see `chain_growth.assembly._attempt_merge`; pass `DOMAIN_SEGID` only for the
         truly final merge of a domain-attachment run. The default is None.
+    strip_terminal_caps : boolean, optional
+        see `chain_growth.assembly._attempt_merge`; pass True only for the truly
+        final merge. The default is False.
 
     Returns
     -------
@@ -83,7 +86,8 @@ def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
     if draw_indices and u1.trajectory.n_frames == 1 and u2.trajectory.n_frames == 1:
         if _attempt_merge(u1, u2, select, index_clash_l, index_merge_l,
                           rmsd_cut_off, clash_distance,
-                          relabel_domain_segid=relabel_domain_segid) is None:
+                          relabel_domain_segid=relabel_domain_segid,
+                          strip_terminal_caps=strip_terminal_caps) is None:
             raise ValueError(
                 "fragment_assembly: both fragments have only one frame, so there is "
                 "only one possible alignment/clash trial, and it failed (RMSD or "
@@ -111,7 +115,8 @@ def fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
         assembly_atempt += 1
         u = _attempt_merge(u1, u2, select, index_clash_l, index_merge_l,
                            rmsd_cut_off, clash_distance,
-                           relabel_domain_segid=relabel_domain_segid)
+                           relabel_domain_segid=relabel_domain_segid,
+                           strip_terminal_caps=strip_terminal_caps)
         if u is not None:
             if writePDB :
                # save atom positions + topology for first pair in a pdb file
@@ -141,7 +146,7 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
              dict_to_fragment_folder=None, rmsd_cut_off=0.6, clash_distance=2.0, capping_groups=True,
              ri_l=None, streamlit_progressbar=None, verbose=False, domain_id=None,
              domain_overlap=None, strip_cap_nterm=None, strip_cap_cterm=None,
-             num_threads=None, progress=True):
+             num_threads=None, progress=True, strip_terminal_caps=True):
     """ perform hierarchical chain growth 
     assemble fragments/ pairs of fragments until reaching the full-length chain
     by calling _loop_func -> does the inner loop and calls fragment assembly
@@ -212,6 +217,16 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
         to False to suppress it -- e.g. when embedding this in another UI that has its
         own progress reporting (see `streamlit_progressbar`), or to keep captured
         output clean.
+    strip_terminal_caps : boolean, optional
+        whether to remove a leftover leading ACE and/or trailing NME residue from the
+        truly final, full-length assembled chain, checked by residue name rather than
+        position -- a safety net independent of (and applied after) strip_cap_nterm/
+        strip_cap_cterm, which work by position and are only correct if those are set
+        to match which physical end of the chain each one actually governs (easy to
+        get backwards, particularly for a domain-attachment run; see
+        `chain_growth.assembly._strip_terminal_caps`'s docstring for a real example of
+        exactly that mistake silently deleting a domain's real terminal residue). The
+        default is True.
 
     Returns
     -------
@@ -265,7 +280,8 @@ def hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path, kmax,
              "overlap_d": overlaps_d, "promotion": promotion, "capping_groups": capping_groups,
              "draw_indices" : draw_indices, "verbose": verbose,
              "domain_id": domain_id, "domain_overlap": domain_overlap,
-             "strip_cap_nterm": strip_cap_nterm, "strip_cap_cterm": strip_cap_cterm }
+             "strip_cap_nterm": strip_cap_nterm, "strip_cap_cterm": strip_cap_cterm,
+             "strip_terminal_caps": strip_terminal_caps }
         # POOL LOOP application
         with Pool(level_num_threads) as p:
             func = partial(_loop_func, d)
@@ -343,6 +359,7 @@ def _loop_func(variables, pairs):
     domain_overlap = variables["domain_overlap"]
     strip_cap_nterm = variables["strip_cap_nterm"]
     strip_cap_cterm = variables["strip_cap_cterm"]
+    strip_terminal_caps = variables["strip_terminal_caps"]
 
     overlap = overlaps_d[0]
 
@@ -433,13 +450,18 @@ def _loop_func(variables, pairs):
         # own docstring) from the output instead of leaving it looking like two
         # separate molecules/chains
         relabel_domain_segid = DOMAIN_SEGID if (last_level and domain_id is not None) else None
+        # unlike relabel_domain_segid, this is not domain-specific: any run's truly
+        # final merge can have a leftover cap (see strip_terminal_caps's docstring
+        # on hierarchical_chain_growth)
+        strip_caps_now = strip_terminal_caps and last_level
 
         # assemble the fragments into pairs
         # (or pairs into pairs of pairs)
         if  draw_indices:
             rs = fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
                               rmsd_cut_off, clash_distance,  kmax=k_max,
-                              relabel_domain_segid=relabel_domain_segid)
+                              relabel_domain_segid=relabel_domain_segid,
+                              strip_terminal_caps=strip_caps_now)
             ###############
             #r_l.append(rs)
             ###############
@@ -448,7 +470,8 @@ def _loop_func(variables, pairs):
             rs = r_l[m_i]
             fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
                               rmsd_cut_off, clash_distance,  kmax=k_max, ri_l=rs,
-                              draw_indices=draw_indices, relabel_domain_segid=relabel_domain_segid)
+                              draw_indices=draw_indices, relabel_domain_segid=relabel_domain_segid,
+                              strip_terminal_caps=strip_caps_now)
             return None
  
 

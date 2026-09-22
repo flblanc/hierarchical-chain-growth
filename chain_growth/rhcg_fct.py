@@ -21,7 +21,7 @@ from chain_growth.assembly import (
 
 def reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
          rmsd_cut_off, clash_distance, kmax, w_l, ri_l=None, draw_indices=True,
-         chain_weights_prev_l=None, relabel_domain_segid=None):
+         chain_weights_prev_l=None, relabel_domain_segid=None, strip_terminal_caps=False):
     """ assemble the fragments to pairs
     
     Parameters
@@ -64,6 +64,9 @@ def reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merg
     relabel_domain_segid : string, optional
         see `chain_growth.assembly._attempt_merge`; pass `DOMAIN_SEGID` only for the
         truly final merge of a domain-attachment run. The default is None.
+    strip_terminal_caps : boolean, optional
+        see `chain_growth.assembly._attempt_merge`; pass True only for the truly
+        final merge. The default is False.
 
 
     Returns
@@ -99,7 +102,8 @@ def reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merg
     if draw_indices and u1.trajectory.n_frames == 1 and u2.trajectory.n_frames == 1:
         if _attempt_merge(u1, u2, select, index_clash_l, index_merge_l,
                           rmsd_cut_off, clash_distance,
-                          relabel_domain_segid=relabel_domain_segid) is None:
+                          relabel_domain_segid=relabel_domain_segid,
+                          strip_terminal_caps=strip_terminal_caps) is None:
             raise ValueError(
                 "reweighted_fragment_assembly: both fragments have only one frame, "
                 "so there is only one possible alignment/clash trial, and it failed "
@@ -129,7 +133,8 @@ def reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merg
         assembly_atempt += 1
         u = _attempt_merge(u1, u2, select, index_clash_l, index_merge_l,
                            rmsd_cut_off, clash_distance,
-                           relabel_domain_segid=relabel_domain_segid)
+                           relabel_domain_segid=relabel_domain_segid,
+                           strip_terminal_caps=strip_terminal_caps)
         if u is not None:
             if writePDB :
                # save atom positions + topology for first pair in a pdb file
@@ -164,7 +169,7 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
              rmsd_cut_off=0.6, clash_distance=2.0, capping_groups=True,
              ri_l=None,  path2weights='weights/', theta=10.0,  verbose=False,
              domain_id=None, domain_overlap=None, strip_cap_nterm=None, strip_cap_cterm=None,
-             progress=True):
+             progress=True, strip_terminal_caps=True):
     """ perform reweighted hierarchical chain growth (+ ímportance sampling)
     assemble fragments (reweighted according to experimental data)
                         or pairs of fragments until reaching the full-length chain
@@ -208,6 +213,8 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
         whether to print a per-level tqdm progress bar to stderr, tracking how many of
         the current level's fragment pairs have finished. See `hierarchical_chain_growth`.
         The default is True.
+    strip_terminal_caps : boolean, optional
+        see `hierarchical_chain_growth`. The default is True.
 
     Returns
     -------
@@ -316,6 +323,10 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
             # level, see its own docstring) from the output instead of leaving it
             # looking like two separate molecules/chains
             relabel_domain_segid = DOMAIN_SEGID if (last_level and domain_id is not None) else None
+            # unlike relabel_domain_segid, this is not domain-specific: any run's
+            # truly final merge can have a leftover cap (see strip_terminal_caps's
+            # docstring on hierarchical_chain_growth)
+            strip_caps_now = strip_terminal_caps and last_level
 
             # get indices for assembly
             index_aln_l, index_clash_l, index_merge_l = get_residue_indices_for_assembly(
@@ -345,7 +356,8 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
                 rs, acw_mi = reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
                                   rmsd_cut_off, clash_distance,  kmax=k_max, w_l=w_l,
                                   chain_weights_prev_l=chain_weights_prev_l,
-                                  relabel_domain_segid=relabel_domain_segid)
+                                  relabel_domain_segid=relabel_domain_segid,
+                                  strip_terminal_caps=strip_caps_now)
                 r_l.append(rs)
                 assembled_chain_weights.append(acw_mi)
             else:
@@ -353,7 +365,8 @@ def reweighted_hierarchical_chain_growth(hcg_l, promo_l, overlaps_d, path0, path
                 acw_mi = reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merge_l,
                                   rmsd_cut_off, clash_distance,  kmax=k_max, w_l=w_l, ri_l=rs,
                                   draw_indices=draw_indices, chain_weights_prev_l=chain_weights_prev_l,
-                                  relabel_domain_segid=relabel_domain_segid)
+                                  relabel_domain_segid=relabel_domain_segid,
+                                  strip_terminal_caps=strip_caps_now)
                 assembled_chain_weights.append(acw_mi)
             c1 += 2
         if draw_indices:
