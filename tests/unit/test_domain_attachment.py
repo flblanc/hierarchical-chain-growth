@@ -256,3 +256,45 @@ def test_find_clashes_excludes_marked_buried_domain_atoms(tmp_path):
     u1_all_buried = mda.Universe(str(tmp_path / 'all_buried' / 'pair0.pdb'))
     clashes_all_buried = find_clashes(u1_all_buried, u2, index1b=-3, index2e=2)
     assert clashes_all_buried == 0
+
+
+def test_fragment_assembly_raises_on_single_frame_deterministic_failure(monkeypatch):
+    '''When both fragments have exactly one frame (e.g. a domain-junction fragment
+    built with too small a kmax, joined to the always-rigid, single-frame domain),
+    there is only ever one possible alignment/clash trial. If it fails, retrying it
+    forever cannot ever succeed -- fragment_assembly must raise immediately instead
+    of hanging, rather than spinning in its rejection-sampling loop forever.'''
+    import chain_growth.hcg_fct as hcg_fct
+
+    u1 = mda.Universe(os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'))
+    u2 = mda.Universe(os.path.join(examples_dir, 'MDfragments/1/pair0.pdb'))
+    assert u1.trajectory.n_frames == 1 and u2.trajectory.n_frames == 1
+
+    # deterministically force the single possible trial to fail, regardless of the
+    # two fragments' real geometry -- this test is about the guard logic, not
+    # whether these two particular fragments happen to clash
+    monkeypatch.setattr(hcg_fct, '_attempt_merge', lambda *a, **k: None)
+
+    with pytest.raises(ValueError, match='only one possible alignment/clash trial'):
+        hcg_fct.fragment_assembly(u1, u2, dire=str('unused'), select={}, index_clash_l=[0, 0],
+                                   index_merge_l=[0, -1, 0, -1], rmsd_cut_off=0.6,
+                                   clash_distance=2.0, kmax=1)
+
+
+def test_reweighted_fragment_assembly_raises_on_single_frame_deterministic_failure(monkeypatch):
+    '''Same guard as fragment_assembly (see above), for the reweighted/importance-
+    sampling code path -- it has the identical single-possible-trial hang risk.'''
+    import numpy as np
+    import chain_growth.rhcg_fct as rhcg_fct
+
+    u1 = mda.Universe(os.path.join(examples_dir, 'MDfragments/0/pair0.pdb'))
+    u2 = mda.Universe(os.path.join(examples_dir, 'MDfragments/1/pair0.pdb'))
+    assert u1.trajectory.n_frames == 1 and u2.trajectory.n_frames == 1
+
+    monkeypatch.setattr(rhcg_fct, '_attempt_merge', lambda *a, **k: None)
+
+    with pytest.raises(ValueError, match='only one possible alignment/clash trial'):
+        rhcg_fct.reweighted_fragment_assembly(
+            u1, u2, dire=str('unused'), select={}, index_clash_l=[0, 0],
+            index_merge_l=[0, -1, 0, -1], rmsd_cut_off=0.6, clash_distance=2.0,
+            kmax=1, w_l=[np.array([1.0]), np.array([1.0])])

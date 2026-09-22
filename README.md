@@ -128,6 +128,19 @@ See `examples/run_chain_growth/run_hcg_domain_attachment_from_dimer_library.py` 
 the full worked example, which combines this with `run_hcg_from_dimer_library.py`'s
 approach for the rest of the IDR.
 
+**`build_domain_junction_fragment`'s own `kmax` needs real headroom, even for a
+small test run.** It's tempting to reuse a small, quick-test `kmax` (e.g. `kmax=1`)
+for this call too, but the domain is always a single, rigid conformation, so if the
+junction fragment itself also has only one sampled conformation, the domain-merge
+step has exactly one possible alignment/clash trial to ever succeed with -- no
+number of retries can turn a failing trial into a passing one. `fragment_assembly`
+detects this exact case (both fragments having a single frame) and raises a clear
+`ValueError` immediately rather than hanging, but the real fix is to give
+`build_domain_junction_fragment` its own, independent, sufficiently large `kmax`
+(e.g. 100+) so the domain-merge step has real, distinct candidates to search over --
+decoupled from whatever (possibly much smaller) `kmax` the rest of a quick test run
+uses.
+
 ### Speeding up clash-checks against a large domain (optional)
 
 Once merged in, the domain is by far the largest thing clash-checked against at

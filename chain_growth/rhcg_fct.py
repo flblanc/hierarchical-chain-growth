@@ -84,8 +84,26 @@ def reweighted_fragment_assembly(u1, u2, dire, select, index_clash_l, index_merg
     assembled_chain_weights = np.zeros(kmax)
     
     if ri_l is None:
-        # array to store random frame indices of successfully assembled fragments / pairs        
+        # array to store random frame indices of successfully assembled fragments / pairs
         rs = np.zeros((kmax, 2))
+
+    # when both fragments have exactly one frame, there is only ever one possible
+    # (r1, r2) combination -- every iteration of the loop below would draw frame 0
+    # from each and repeat the exact same, deterministic trial forever. If that one
+    # trial doesn't pass, retrying cannot ever succeed, so fail fast with a clear
+    # error instead of spinning indefinitely (see fragment_assembly in hcg_fct.py
+    # for the same guard, and its full rationale)
+    if draw_indices and u1.trajectory.n_frames == 1 and u2.trajectory.n_frames == 1:
+        if _attempt_merge(u1, u2, select, index_clash_l, index_merge_l,
+                          rmsd_cut_off, clash_distance) is None:
+            raise ValueError(
+                "reweighted_fragment_assembly: both fragments have only one frame, "
+                "so there is only one possible alignment/clash trial, and it failed "
+                "(RMSD or clash criterion not met) -- retrying cannot ever succeed. "
+                "This typically means one of the two fragments (often a "
+                "domain-junction fragment built with too small a kmax) has too few "
+                "sampled conformations to have a real chance of avoiding a clash. "
+                "Give it a larger kmax (more sampled frames) and try again.")
 
     writePDB = True
     while k < kmax:
