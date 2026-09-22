@@ -34,6 +34,21 @@ Every other IDR fragment doesn't touch the domain at all, so it's an ordinary
 overlap=1/capping_groups=True join, sourced from the dimer library exactly as in
 `run_hcg_from_dimer_library.py`.
 
+Why the junction fragment needs its own, independent kmax
+---------------------------------------------------------
+The domain is always a single, rigid conformation. If the junction fragment built
+above also ended up with only a handful of sampled conformations -- e.g. because
+`kmax` was set low for a quick test run -- the one HCG level where the domain
+actually gets merged in (see `hierarchical_chain_growth`'s `domain_id`/
+`domain_overlap`) could run out of distinct candidates to try against the domain's
+real, unmovable surface. In the extreme case of `kmax=1`, the junction fragment has
+exactly one conformation, so that level has exactly one possible alignment/clash
+trial -- if it fails, `fragment_assembly` now raises a clear error immediately
+rather than retrying forever, but no amount of retrying could ever have turned that
+one deterministic failure into a success anyway. `junction_kmax` below is set
+independently of `kmax` for exactly this reason: it stays at least 100 even when
+`kmax` is small, so the domain-merge level always has real headroom to search.
+
 Speeding up the domain's own clash-checks (optional)
 --------------------------------------------------------
 The domain is by far the largest thing being clash-checked against at every level
@@ -97,8 +112,18 @@ terminus = 'C'
 # residues the domain shares with the junction fragment's overlap region; see
 # build_domain_junction_fragment's docstring for why this must be 2, not 1
 domain_overlap = 2
-# number of full-length conformers to assemble (also used for the junction's own ensemble)
+# number of full-length conformers to assemble
 kmax = 200
+# number of candidate conformations to sample for the domain-junction fragment
+# specifically (see build_domain_junction_fragment's call below). This is
+# deliberately NOT just reused from kmax: the domain is always a single, rigid
+# conformation, so if the junction fragment itself also had only a handful of
+# sampled conformations (e.g. because kmax was set low for a quick test run), the
+# domain-merge step could end up with too few -- or, in the extreme case of
+# kmax=1, exactly one -- candidates to ever find one that doesn't clash with the
+# domain. junction_kmax stays at least 100 regardless of how small kmax is, and at
+# least kmax if kmax itself is set above 100 for a production run.
+junction_kmax = max(100, kmax)
 
 # prepare the domain as a rigid, single-frame MD-fragment folder, matching the
 # "pair0.pdb" + "pair.xtc" convention every ordinary MD fragment folder uses.
@@ -114,7 +139,7 @@ idr_boundary_residue = fragment_l[0][0] if terminus == 'C' else fragment_l[-1][-
 build_domain_junction_fragment(
     dimer_library=dimer_library, domain_pdb=folded_domain_pdb,
     idr_boundary_residue=idr_boundary_residue, terminus=terminus,
-    path0=path0, junction_id=junction_id, kmax=kmax)
+    path0=path0, junction_id=junction_id, kmax=junction_kmax)
 
 ## lists for the HCG: [ordinary dimer-library fragments..., junction, domain]
 ## (attaching at the domain's N-terminus) or [domain, junction, ordinary

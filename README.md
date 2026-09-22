@@ -139,7 +139,9 @@ detects this exact case (both fragments having a single frame) and raises a clea
 `build_domain_junction_fragment` its own, independent, sufficiently large `kmax`
 (e.g. 100+) so the domain-merge step has real, distinct candidates to search over --
 decoupled from whatever (possibly much smaller) `kmax` the rest of a quick test run
-uses.
+uses. `run_hcg_domain_attachment_from_dimer_library.py` does this via
+`junction_kmax = max(100, kmax)`: at least 100 regardless of how small `kmax` is,
+and at least `kmax` itself if that's set above 100 for a production run.
 
 ### Speeding up clash-checks against a large domain (optional)
 
